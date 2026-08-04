@@ -142,7 +142,7 @@ All settings come from `.env` (see `.env.example`).
 |---|---|---|
 | `PORT` | `3000` | HTTP port |
 | `NODE_ENV` | `development` | `production` enables static asset caching |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | — | MySQL connection |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | `127.0.0.1` / `3306` | MySQL connection — see the IPv6 note below |
 | `DATABASE_URL` | — | Alternative single-string form, `mysql://user:pass@host:3306/db`; takes priority |
 | `DB_SSL` | `false` | `true` when the server requires TLS (usually remote databases) |
 | `DB_POOL_SIZE` | `10` | Connection pool size — lower it on shared hosting with a tight connection limit |
@@ -154,6 +154,16 @@ All settings come from `.env` (see `.env.example`).
 
 Both alert thresholds are read per request, so changing them only needs a restart —
 no migration and no data change.
+
+> **Use `127.0.0.1`, not `localhost`, for `DB_HOST`.** Since Node 17, `localhost`
+> resolves to IPv6 `::1` first, while MySQL grants are normally issued for
+> `user@localhost` / `user@127.0.0.1`. MySQL treats those as different hosts, so the
+> login is rejected with `ER_ACCESS_DENIED_ERROR` even though the password is correct.
+> If you hit that, `GET /api/health` reports the host MySQL saw — `'***'@'::1'` is the
+> signature of this exact problem.
+
+Environment variables are read once at startup. **After changing any of them, restart
+the app** — a running process keeps the old values.
 
 ---
 

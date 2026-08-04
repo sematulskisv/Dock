@@ -47,7 +47,10 @@ function buildPoolConfig() {
 
   return {
     ...common,
-    host: env('DB_HOST', 'localhost'),
+    // Numatytasis 127.0.0.1, o ne 'localhost': nuo Node 17 'localhost'
+    // issprendziamas i IPv6 (::1), o MySQL teises paprastai galioja tik
+    // 'user@localhost' / 'user@127.0.0.1'.
+    host: env('DB_HOST', '127.0.0.1'),
     port: Number(env('DB_PORT')) || 3306,
     // Slaptazodzio NEapkarpom: jame tarpas gali buti tikras simbolis.
     // Vietoj to /api/health parodo, ar reiksme turi tarpu kraštuose.

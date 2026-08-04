@@ -41,7 +41,11 @@ function explainDbError(err) {
   const code = (err && (err.code || err.errno)) || null;
   switch (code) {
     case 'ER_ACCESS_DENIED_ERROR':
-      return 'neteisingas DB_USER arba DB_PASSWORD';
+      // Daznas atvejis: DB_HOST=localhost, Node ji issprendzia i IPv6 ::1, o
+      // naudotojui teises duotos tik is 'localhost'/'127.0.0.1'. Slaptazodis
+      // tada teisingas, bet MySQL vis tiek atmeta.
+      return "neteisingas DB_USER arba DB_PASSWORD; jei detail rodo '::1', "
+        + 'pakeiskite DB_HOST i 127.0.0.1';
     case 'ER_BAD_DB_ERROR':
       return 'tokios duomenu bazes nera - patikrinkite DB_NAME';
     case 'ECONNREFUSED':
