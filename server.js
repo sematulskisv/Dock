@@ -169,8 +169,9 @@ const SETUP_PAGE = `<!DOCTYPE html>
     <li><code>DB_PASSWORD</code></li>
     <li><code>DB_NAME</code></li>
   </ul>
-  <p>Tiksli klaidos priežastis įrašyta į serverio vykdymo žurnalą. Sutvarkius
-     kintamuosius programa prisijungs pati — perkrauti nebūtina.</p>
+  <p><strong>Pakeitę kintamuosius, programą būtinai perkraukite</strong> — veikiantis
+     procesas naujų reikšmių nemato, jos nuskaitomos tik paleidimo metu.</p>
+  <p>Tiksli klaidos priežastis įrašyta į serverio vykdymo žurnalą.</p>
   <p><a href="/api/health">/api/health</a></p>
 </div></body></html>`;
 
@@ -232,7 +233,10 @@ async function start() {
 
   await tryInitDb();
 
-  // Kol DB neprieinama - bandom prisijungti kas 30 s (be perkrovimo)
+  // Kol DB neprieinama - bandom prisijungti kas 30 s. Tai padeda, kai DB
+  // laikinai nepasiekiama, BET ne tada, kai keiciami aplinkos kintamieji:
+  // mysql2 pool'as sukuriamas is process.env vieną kartą modulio krovimo metu,
+  // o veikiantis procesas naujų kintamųjų nemato. Tada butinas perkrovimas.
   const retry = setInterval(async () => {
     if (dbState.ready) return;
     if (await tryInitDb()) {
