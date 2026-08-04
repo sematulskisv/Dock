@@ -142,6 +142,23 @@ app.get('/api/health', async (req, res) => {
       if (dbState.lastCode) body.code = dbState.lastCode;
       const hint = explainDbError({ code: dbState.lastCode });
       if (hint) body.hint = hint;
+
+      // Kiek proceso veikia. Jei sis skaicius didelis, o kintamieji ka tik
+      // keisti - vadinasi programa nebuvo perkrauta ir vis dar naudoja senas
+      // reiksmes.
+      body.uptimeSeconds = Math.round(process.uptime());
+
+      // Slaptazodzio ILGIS (ne reiksme) - parodo, ar procesas mato nauja,
+      // ar vis dar sena slaptazodi.
+      body.passwordLength = (process.env.DB_PASSWORD || '').length;
+
+      // Reiksmes su tarpais krastuose - dazna ir nematoma klaida.
+      const padded = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']
+        .filter((key) => {
+          const value = process.env[key];
+          return typeof value === 'string' && value !== value.trim();
+        });
+      if (padded.length) body.whitespace = padded;
     }
 
     return res.status(503).json(body);

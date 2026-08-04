@@ -8,14 +8,22 @@ const mysql = require('mysql2/promise');
 // ---------------------------------------------------------------------
 // Prisijungimas
 // ---------------------------------------------------------------------
+// Hostingu valdymo skyduose ivedant/iklijuojant reiksmes labai lengva palikti
+// nematoma tarpa gale. MySQL tada atmeta prisijungima su ER_ACCESS_DENIED_ERROR,
+// o skyde viskas atrodo teisingai. Todel visas reiksmes apkarpom patys.
+function env(name, fallback = '') {
+  const value = process.env[name];
+  return value === undefined || value === null ? fallback : String(value).trim();
+}
+
 function buildPoolConfig() {
-  const ssl = String(process.env.DB_SSL || '').toLowerCase() === 'true'
+  const ssl = env('DB_SSL').toLowerCase() === 'true'
     ? { rejectUnauthorized: false }
     : undefined;
 
   const common = {
     waitForConnections: true,
-    connectionLimit: Number(process.env.DB_POOL_SIZE || 10),
+    connectionLimit: Number(env('DB_POOL_SIZE')) || 10,
     queueLimit: 0,
     charset: 'utf8mb4_unicode_ci',
     // Visos DATETIME reiksmes traktuojamos kaip UTC (zr. db/schema.sql).
@@ -25,8 +33,8 @@ function buildPoolConfig() {
     ssl,
   };
 
-  if (process.env.DATABASE_URL) {
-    const url = new URL(process.env.DATABASE_URL);
+  if (env('DATABASE_URL')) {
+    const url = new URL(env('DATABASE_URL'));
     return {
       ...common,
       host: url.hostname,
@@ -39,11 +47,13 @@ function buildPoolConfig() {
 
   return {
     ...common,
-    host: process.env.DB_HOST || 'localhost',
-    port: Number(process.env.DB_PORT || 3306),
-    user: process.env.DB_USER || 'root',
+    host: env('DB_HOST', 'localhost'),
+    port: Number(env('DB_PORT')) || 3306,
+    // Slaptazodzio NEapkarpom: jame tarpas gali buti tikras simbolis.
+    // Vietoj to /api/health parodo, ar reiksme turi tarpu kraštuose.
+    user: env('DB_USER', 'root'),
     password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'warehouse_ops',
+    database: env('DB_NAME', 'warehouse_ops'),
   };
 }
 
