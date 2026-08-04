@@ -22,7 +22,13 @@ app.disable('x-powered-by');
 // puslapis be jokios uzuominos, ka taisyti. Todel dabar serveris pakyla
 // visada, aiskiai parodo problema ir fone bando prisijungti is naujo.
 // ---------------------------------------------------------------------
-const dbState = { ready: false, lastError: null, lastCode: null, attempts: 0 };
+const dbState = {
+  ready: false,
+  everConnected: false, // ar bent karta pavyko prisijungti (zr. /api/health)
+  lastError: null,
+  lastCode: null,
+  attempts: 0,
+};
 
 /** Kuriu butinu kintamuju truksta (DB_PASSWORD gali buti tuscias). */
 function missingDbEnv() {
@@ -30,9 +36,9 @@ function missingDbEnv() {
   return ['DB_HOST', 'DB_USER', 'DB_NAME'].filter((key) => !process.env[key]);
 }
 
-/** Zmogui suprantama uzuomina pagal MySQL klaidos koda (tik i logus). */
+/** Zmogui suprantama uzuomina pagal MySQL klaidos koda. */
 function explainDbError(err) {
-  const code = err.code || err.errno;
+  const code = (err && (err.code || err.errno)) || null;
   switch (code) {
     case 'ER_ACCESS_DENIED_ERROR':
       return 'neteisingas DB_USER arba DB_PASSWORD';
@@ -56,6 +62,7 @@ async function tryInitDb() {
   try {
     await db.initDb();
     dbState.ready = true;
+    dbState.everConnected = true;
     dbState.lastError = null;
     dbState.lastCode = null;
     console.log('[server] duomenu baze paruosta');
@@ -63,7 +70,7 @@ async function tryInitDb() {
   } catch (err) {
     dbState.ready = false;
     dbState.lastError = err.message;
-    dbState.lastCode = err.code || null;
+    dbState.lastCode = err.code || err.errno || null;
 
     console.error(`[server] nepavyko prisijungti prie duomenu bazes (bandymas ${dbState.attempts}): ${err.message}`);
 
@@ -118,12 +125,26 @@ app.use('/api', (req, res, next) => {
 // ---------------------------------------------------------------------
 app.get('/api/health', async (req, res) => {
   if (!dbState.ready) {
-    return res.status(503).json({
+    const missing = missingDbEnv();
+    const body = {
       status: 'degraded',
       database: 'down',
-      configured: missingDbEnv().length === 0,
+      configured: missing.length === 0,
       timestamp: new Date().toISOString(),
-    });
+    };
+
+    // Kol nera buve NE VIENO sekmingo prisijungimo, parodom ir MySQL klaidos
+    // koda su uzuomina - kitaip pirminio diegimo klaidos diagnozuoti neimanoma
+    // neturint hostingo zurnalu. Rodomi tik kintamuju VARDAI ir klaidos kodas,
+    // niekada reiksmes. Vienąkart prisijungus tai daugiau nerodoma.
+    if (!dbState.everConnected) {
+      if (missing.length) body.missing = missing;
+      if (dbState.lastCode) body.code = dbState.lastCode;
+      const hint = explainDbError({ code: dbState.lastCode });
+      if (hint) body.hint = hint;
+    }
+
+    return res.status(503).json(body);
   }
   try {
     await db.query('SELECT 1');
