@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="lt">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#ff6a1a" />
+<title>Sandėlio krovos operacijos</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ff6a1a'/%3E%3Cpath d='M6 20V11h11v9H6zm13-6h4l3 3v3h-7v-6z' fill='white'/%3E%3Ccircle cx='10' cy='22' r='2.4' fill='%23ff6a1a' stroke='white' stroke-width='1.6'/%3E%3Ccircle cx='22' cy='22' r='2.4' fill='%23ff6a1a' stroke='white' stroke-width='1.6'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="/styles.css?v=1" />
+</head>
+<body>
+
+<!-- ================= PRISIJUNGIMAS ================= -->
+<div id="loginView" class="login-view" hidden>
+  <form class="login-card" id="loginForm" autocomplete="on">
+    <div class="login-brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <h1>Sandėlio krova</h1>
+        <p data-i18n="login.subtitle">Pakrovimo ir iškrovimo registras</p>
+      </div>
+    </div>
+
+    <label class="field">
+      <span data-i18n="login.email">El. paštas</span>
+      <input type="email" id="loginEmail" name="email" required autocomplete="username" inputmode="email" />
+    </label>
+
+    <label class="field">
+      <span data-i18n="login.password">Slaptažodis</span>
+      <input type="password" id="loginPassword" name="password" required autocomplete="current-password" />
+    </label>
+
+    <p class="form-error" id="loginError" role="alert" hidden></p>
+
+    <button type="submit" class="btn btn-primary btn-lg" id="loginSubmit" data-i18n="login.submit">Prisijungti</button>
+
+    <div class="login-lang">
+      <button type="button" class="lang-btn" data-lang="lt">LT</button>
+      <button type="button" class="lang-btn" data-lang="en">EN</button>
+    </div>
+  </form>
+</div>
+
+<!-- ================= APLIKACIJA ================= -->
+<div id="appShell" class="app-shell" hidden>
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Sandėlio krova</span>
+    </div>
+
+    <nav class="tabs" id="mainTabs" role="tablist">
+      <button class="tab is-active" data-view="dashboard" data-i18n="nav.dashboard">Šiandien</button>
+      <button class="tab" data-view="history" data-i18n="nav.history">Istorija</button>
+      <button class="tab" data-view="audit" data-i18n="nav.audit">Auditas</button>
+      <button class="tab admin-only" data-view="admin" data-i18n="nav.admin">Nustatymai</button>
+    </nav>
+
+    <div class="topbar-right">
+      <span class="live-dot" id="liveDot" title="Automatinis atnaujinimas"></span>
+      <div class="lang-switch">
+        <button type="button" class="lang-btn" data-lang="lt">LT</button>
+        <button type="button" class="lang-btn" data-lang="en">EN</button>
+      </div>
+      <div class="user-chip" id="userChip">
+        <span class="user-name" id="userName">—</span>
+        <span class="user-role badge" id="userRole">—</span>
+      </div>
+      <button class="btn btn-ghost btn-icon" id="logoutBtn" title="Atsijungti" aria-label="Atsijungti">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="main">
+
+    <!-- ---------- ŠIANDIEN / DASHBOARD ---------- -->
+    <section class="view is-active" id="view-dashboard">
+      <div class="stats-row" id="statsRow"></div>
+
+      <div class="toolbar">
+        <div class="toolbar-filters" id="filtersDashboard"></div>
+        <div class="toolbar-actions">
+          <button class="btn btn-ghost" id="exportBtnDash">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span data-i18n="action.exportCsv">CSV</span>
+          </button>
+          <button class="btn btn-primary" id="newApptBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span data-i18n="action.new">Naujas vizitas</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="list-host" id="listDashboard"></div>
+    </section>
+
+    <!-- ---------- ISTORIJA ---------- -->
+    <section class="view" id="view-history">
+      <div class="stats-row" id="statsRowHistory"></div>
+
+      <div class="toolbar">
+        <div class="toolbar-filters" id="filtersHistory"></div>
+        <div class="toolbar-actions">
+          <button class="btn btn-ghost" id="exportBtnHistory">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span data-i18n="action.exportCsv">CSV</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="list-host" id="listHistory"></div>
+      <div class="pager" id="pagerHistory"></div>
+    </section>
+
+    <!-- ---------- AUDITAS ---------- -->
+    <section class="view" id="view-audit">
+      <div class="segmented" id="auditModeSwitch">
+        <button class="seg is-active" data-mode="status" data-i18n="audit.statusChanges">Būsenų keitimai</button>
+        <button class="seg" data-mode="all" data-i18n="audit.allActions">Visi veiksmai</button>
+      </div>
+
+      <div class="toolbar">
+        <div class="toolbar-filters" id="filtersAudit"></div>
+      </div>
+
+      <div class="list-host" id="listAudit"></div>
+      <div class="pager" id="pagerAudit"></div>
+    </section>
+
+    <!-- ---------- NUSTATYMAI (admin) ---------- -->
+    <section class="view" id="view-admin">
+      <div class="admin-grid">
+        <div class="panel">
+          <div class="panel-head">
+            <h2 data-i18n="admin.users">Naudotojai</h2>
+            <button class="btn btn-primary btn-sm" id="newUserBtn" data-i18n="admin.addUser">Pridėti</button>
+          </div>
+          <div id="usersList" class="panel-body"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2 data-i18n="admin.docks">Sandėlio vartai</h2>
+            <button class="btn btn-primary btn-sm" id="newDockBtn" data-i18n="admin.addDock">Pridėti</button>
+          </div>
+          <div id="docksList" class="panel-body"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ================= MODALAI ================= -->
+
+<!-- Vizito forma -->
+<div class="modal" id="apptModal" hidden>
+  <div class="modal-scrim" data-close></div>
+  <div class="modal-card modal-lg" role="dialog" aria-modal="true" aria-labelledby="apptModalTitle">
+    <div class="modal-head">
+      <h2 id="apptModalTitle" data-i18n="form.newTitle">Naujas vizitas</h2>
+      <button class="btn btn-ghost btn-icon" data-close aria-label="Uždaryti">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <form class="modal-body form-grid" id="apptForm">
+      <input type="hidden" id="apptId" />
+
+      <label class="field">
+        <span data-i18n="form.plannedAt">Planuojamas atvykimas</span>
+        <input type="datetime-local" id="fPlannedAt" required />
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.operation">Operacija</span>
+        <select id="fOperation" required>
+          <option value="loading" data-i18n="op.loading">Pakrovimas</option>
+          <option value="unloading" data-i18n="op.unloading">Iškrovimas</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.truckPlate">Vilkiko valst. nr.</span>
+        <input type="text" id="fTruckPlate" required maxlength="32" autocapitalize="characters" />
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.trailerPlate">Priekabos valst. nr.</span>
+        <input type="text" id="fTrailerPlate" maxlength="32" autocapitalize="characters" />
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.driverName">Vairuotojas</span>
+        <input type="text" id="fDriverName" maxlength="120" />
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.driverPhone">Vairuotojo telefonas</span>
+        <input type="tel" id="fDriverPhone" maxlength="40" inputmode="tel" />
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.carrier">Vežėjas</span>
+        <input type="text" id="fCarrier" maxlength="160" list="carrierOptions" />
+        <datalist id="carrierOptions"></datalist>
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.customer">Klientas</span>
+        <input type="text" id="fCustomer" maxlength="160" list="customerOptions" />
+        <datalist id="customerOptions"></datalist>
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.reference">Užsakymo / siuntos nr.</span>
+        <input type="text" id="fReference" maxlength="120" />
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.dock">Sandėlio vartai</span>
+        <select id="fDock"></select>
+      </label>
+
+      <label class="field field-full">
+        <span data-i18n="form.notes">Pastabos</span>
+        <textarea id="fNotes" rows="3" maxlength="2000"></textarea>
+      </label>
+
+      <p class="form-error field-full" id="apptFormError" role="alert" hidden></p>
+    </form>
+
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close data-i18n="action.cancel">Atšaukti</button>
+      <button class="btn btn-primary" id="apptSaveBtn" data-i18n="action.save">Išsaugoti</button>
+    </div>
+  </div>
+</div>
+
+<!-- Vizito detalės / laiko juosta -->
+<div class="modal" id="detailModal" hidden>
+  <div class="modal-scrim" data-close></div>
+  <div class="modal-card modal-lg" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+    <div class="modal-head">
+      <h2 id="detailTitle">—</h2>
+      <button class="btn btn-ghost btn-icon" data-close aria-label="Uždaryti">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="detailBody"></div>
+    <div class="modal-foot" id="detailFoot"></div>
+  </div>
+</div>
+
+<!-- Būsenos keitimas -->
+<div class="modal" id="statusModal" hidden>
+  <div class="modal-scrim" data-close></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="statusModalTitle">
+    <div class="modal-head">
+      <h2 id="statusModalTitle" data-i18n="status.changeTitle">Keisti būseną</h2>
+      <button class="btn btn-ghost btn-icon" data-close aria-label="Uždaryti">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p class="muted" id="statusModalSummary"></p>
+      <div class="status-choices" id="statusChoices"></div>
+      <label class="field">
+        <span data-i18n="status.note">Pastaba (nebūtina)</span>
+        <input type="text" id="statusNote" maxlength="500" />
+      </label>
+      <p class="form-error" id="statusError" role="alert" hidden></p>
+    </div>
+  </div>
+</div>
+
+<!-- Naudotojo forma (admin) -->
+<div class="modal" id="userModal" hidden>
+  <div class="modal-scrim" data-close></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="userModalTitle">
+    <div class="modal-head">
+      <h2 id="userModalTitle" data-i18n="admin.addUser">Pridėti naudotoją</h2>
+      <button class="btn btn-ghost btn-icon" data-close aria-label="Uždaryti">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form class="modal-body form-grid" id="userForm">
+      <input type="hidden" id="userId" />
+      <label class="field field-full">
+        <span data-i18n="admin.fullName">Vardas ir pavardė</span>
+        <input type="text" id="uFullName" required maxlength="160" />
+      </label>
+      <label class="field field-full">
+        <span data-i18n="login.email">El. paštas</span>
+        <input type="email" id="uEmail" required maxlength="190" />
+      </label>
+      <label class="field">
+        <span data-i18n="admin.role">Rolė</span>
+        <select id="uRole">
+          <option value="operator" data-i18n="role.operator">Sandėlio operatorius</option>
+          <option value="admin" data-i18n="role.admin">Administratorius</option>
+        </select>
+      </label>
+      <label class="field">
+        <span data-i18n="admin.password">Slaptažodis</span>
+        <input type="password" id="uPassword" minlength="8" autocomplete="new-password" />
+      </label>
+      <p class="hint field-full" data-i18n="admin.passwordHint">Redaguojant palikite tuščią, jei slaptažodžio keisti nereikia. Mažiausiai 8 simboliai.</p>
+      <p class="form-error field-full" id="userFormError" role="alert" hidden></p>
+    </form>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close data-i18n="action.cancel">Atšaukti</button>
+      <button class="btn btn-primary" id="userSaveBtn" data-i18n="action.save">Išsaugoti</button>
+    </div>
+  </div>
+</div>
+
+<!-- Vartų forma (admin) -->
+<div class="modal" id="dockModal" hidden>
+  <div class="modal-scrim" data-close></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="dockModalTitle">
+    <div class="modal-head">
+      <h2 id="dockModalTitle" data-i18n="admin.addDock">Pridėti vartus</h2>
+      <button class="btn btn-ghost btn-icon" data-close aria-label="Uždaryti">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <form class="modal-body form-grid" id="dockForm">
+      <input type="hidden" id="dockId" />
+      <label class="field">
+        <span data-i18n="admin.dockCode">Kodas</span>
+        <input type="text" id="dCode" required maxlength="32" />
+      </label>
+      <label class="field">
+        <span data-i18n="admin.dockOrder">Eiliškumas</span>
+        <input type="number" id="dSortOrder" value="0" />
+      </label>
+      <label class="field field-full">
+        <span data-i18n="admin.dockName">Pavadinimas</span>
+        <input type="text" id="dName" maxlength="120" />
+      </label>
+      <p class="form-error field-full" id="dockFormError" role="alert" hidden></p>
+    </form>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close data-i18n="action.cancel">Atšaukti</button>
+      <button class="btn btn-primary" id="dockSaveBtn" data-i18n="action.save">Išsaugoti</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-host" id="toastHost" aria-live="polite"></div>
+
+<script src="/app.js?v=1"></script>
+</body>
+</html>

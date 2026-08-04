@@ -1,0 +1,27 @@
+version: '3.8'
+
+# Greitas vietinis MySQL. Programa paleidziama atskirai su `npm start`.
+services:
+  db:
+    image: mysql:8.0
+    container_name: warehouse-ops-db
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: warehouse_ops
+      MYSQL_USER: warehouse
+      MYSQL_PASSWORD: warehouse
+      TZ: UTC
+    ports:
+      - "3306:3306"
+    volumes:
+      - warehouse_mysqldata:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uwarehouse", "-pwarehouse"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  warehouse_mysqldata:
