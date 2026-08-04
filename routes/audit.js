@@ -7,6 +7,10 @@ const { localDayStart, localDayEnd } = require('../lib/timezone');
 
 const router = express.Router();
 router.use(requireAuth);
+router.use((req, res, next) => {
+  if (req.user.role === 'customer') return res.status(403).json({ error: 'forbidden' });
+  return next();
+});
 
 function page(q) {
   const limit = Math.min(Math.max(Number(q.limit) || 100, 1), 500);

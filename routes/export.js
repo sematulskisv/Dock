@@ -7,6 +7,10 @@ const A = require('../lib/appointments');
 
 const router = express.Router();
 router.use(requireAuth);
+router.use((req, res, next) => {
+  if (req.user.role === 'customer') return res.status(403).json({ error: 'forbidden' });
+  return next();
+});
 
 const TZ = process.env.APP_TIMEZONE || 'Europe/Vilnius';
 

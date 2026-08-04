@@ -6,6 +6,8 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 /exports/
+/uploads/*
+!/uploads/.gitkeep
 /tmp/
 .vscode/
 .idea/

@@ -16,6 +16,7 @@ const I18N = {
     'login.rateLimited': 'Per daug bandymų. Pabandykite vėliau.',
 
     'nav.dashboard': 'Šiandien',
+    'nav.myBookings': 'Mano rezervacijos',
     'nav.schedule': 'Tvarkaraštis',
     'nav.history': 'Istorija',
     'nav.audit': 'Auditas',
@@ -23,6 +24,7 @@ const I18N = {
 
     'role.admin': 'Administratorius',
     'role.operator': 'Sandėlio operatorius',
+    'role.customer': 'Klientas',
 
     'op.loading': 'Pakrovimas',
     'op.unloading': 'Iškrovimas',
@@ -110,6 +112,11 @@ const I18N = {
     'form.reference': 'Užsakymo / siuntos nr.',
     'form.dock': 'Sandėlio vartai',
     'form.notes': 'Pastabos',
+    'form.document': 'Prisegtas dokumentas',
+    'form.documentHint': 'PDF, JPG, PNG arba Excel failas. Kliento registracijai privaloma.',
+    'form.documentRequired': 'Pridėkite dokumentą prieš registruodami vizitą.',
+    'form.uploadDocument': 'Pridėti dokumentą',
+    'form.documents': 'Dokumentai',
     'form.required': 'Užpildykite privalomus laukus',
     'form.saved': 'Išsaugota',
     'form.deleted': 'Ištrinta',
@@ -199,6 +206,7 @@ const I18N = {
     'login.rateLimited': 'Too many attempts. Try again later.',
 
     'nav.dashboard': 'Today',
+    'nav.myBookings': 'My bookings',
     'nav.schedule': 'Schedule',
     'nav.history': 'History',
     'nav.audit': 'Audit',
@@ -206,6 +214,7 @@ const I18N = {
 
     'role.admin': 'Administrator',
     'role.operator': 'Warehouse operator',
+    'role.customer': 'Customer',
 
     'op.loading': 'Loading',
     'op.unloading': 'Unloading',
@@ -293,6 +302,11 @@ const I18N = {
     'form.reference': 'Order / shipment ref.',
     'form.dock': 'Warehouse dock',
     'form.notes': 'Notes',
+    'form.document': 'Attached document',
+    'form.documentHint': 'PDF, JPG, PNG or Excel file. Required for customer bookings.',
+    'form.documentRequired': 'Attach a document before submitting the booking.',
+    'form.uploadDocument': 'Add document',
+    'form.documents': 'Documents',
     'form.required': 'Please fill in the required fields',
     'form.saved': 'Saved',
     'form.deleted': 'Deleted',
@@ -434,7 +448,7 @@ const state = {
   },
   users: [],
   dashboard: { rows: [], stats: null, filters: {} },
-  schedule: { rows: [], date: '' },
+  schedule: { rows: [], busy: [], docks: [], date: '' },
   history: { rows: [], stats: null, total: 0, offset: 0, limit: 50, filters: {} },
   audit: { mode: 'status', rows: [], total: 0, offset: 0, limit: 100, filters: {} },
   statusTarget: null,
@@ -605,6 +619,26 @@ async function api(path, { method = 'GET', body = null } = {}) {
   return data;
 }
 
+async function apiForm(path, formData) {
+  let res;
+  try {
+    res = await fetch(path, { method: 'POST', credentials: 'include', body: formData });
+  } catch {
+    const err = new Error('network');
+    err.code = 'network';
+    throw err;
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `http_${res.status}`);
+    err.code = (data && data.error) || `http_${res.status}`;
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
 function errorMessage(err) {
   switch (err && err.code) {
     case 'network': return t('error.network');
@@ -617,6 +651,10 @@ function errorMessage(err) {
     case 'dock_not_available': return LANG === 'en' ? 'This dock is inactive or no longer exists.' : 'Šie vartai neaktyvūs arba nebeegzistuoja.';
     case 'dock_occupied': return LANG === 'en' ? 'Another truck is already using this dock.' : 'Prie šių vartų jau yra kitas sunkvežimis.';
     case 'use_cancelled_status': return LANG === 'en' ? 'Cancel the appointment instead of deleting it.' : 'Vizito netrinkite — pakeiskite jo būseną į „Atšaukta“.\n';
+    case 'attachment_required': return t('form.documentRequired');
+    case 'file_too_large': return LANG === 'en' ? 'The document is too large.' : 'Dokumento failas per didelis.';
+    case 'invalid_document': return LANG === 'en' ? 'Only PDF, JPG, PNG or Excel files are allowed.' : 'Leidžiami tik PDF, JPG, PNG arba Excel failai.';
+    case 'reservation_occupied': return LANG === 'en' ? 'This time is already booked.' : 'Šis laikas jau užimtas.';
     case 'validation_failed': return t('form.required');
     case 'rate_limited': return t('login.rateLimited');
     default: return t('error.generic');
@@ -826,6 +864,7 @@ function apptRowHtml(a) {
 
   const dock = a.dock_code ? escapeHtml(a.dock_code) : '<span class="muted">—</span>';
   const next = PRIMARY_NEXT[a.status];
+  const canChangeStatus = !state.user || state.user.role !== 'customer';
 
   return `
     <tr class="${classes.join(' ')}" data-id="${a.id}">
@@ -853,8 +892,8 @@ function apptRowHtml(a) {
         </div>
       </td>
       <td class="col-actions">
-        ${next ? `<button class="btn btn-primary btn-sm" data-action="quick-status" data-id="${a.id}" data-next="${next}">${escapeHtml(t(`status.${next}`))}</button>` : ''}
-        <button class="btn btn-sm" data-action="status" data-id="${a.id}">${escapeHtml(t('action.status'))}</button>
+        ${canChangeStatus && next ? `<button class="btn btn-primary btn-sm" data-action="quick-status" data-id="${a.id}" data-next="${next}">${escapeHtml(t(`status.${next}`))}</button>` : ''}
+        ${canChangeStatus ? `<button class="btn btn-sm" data-action="status" data-id="${a.id}">${escapeHtml(t('action.status'))}</button>` : ''}
         <button class="btn btn-ghost btn-sm" data-action="detail" data-id="${a.id}">${escapeHtml(t('action.details'))}</button>
       </td>
     </tr>
@@ -868,6 +907,7 @@ function apptCardHtml(a) {
   else if (alerts.isWaitingLong) classes.push('is-waiting');
 
   const next = PRIMARY_NEXT[a.status];
+  const canChangeStatus = !state.user || state.user.role !== 'customer';
   const meta = [
     [t('col.driver'), a.driver_name],
     [t('filter.carrier'), a.carrier],
@@ -909,8 +949,8 @@ function apptCardHtml(a) {
       ${a.notes ? `<div class="cell-sub">${escapeHtml(a.notes)}</div>` : ''}
 
       <div class="card-actions">
-        ${next ? `<button class="btn btn-primary" data-action="quick-status" data-id="${a.id}" data-next="${next}">${escapeHtml(t(`status.${next}`))}</button>` : ''}
-        <button class="btn" data-action="status" data-id="${a.id}">${escapeHtml(t('action.status'))}</button>
+        ${canChangeStatus && next ? `<button class="btn btn-primary" data-action="quick-status" data-id="${a.id}" data-next="${next}">${escapeHtml(t(`status.${next}`))}</button>` : ''}
+        ${canChangeStatus ? `<button class="btn" data-action="status" data-id="${a.id}">${escapeHtml(t('action.status'))}</button>` : ''}
         <button class="btn btn-ghost" data-action="detail" data-id="${a.id}">${escapeHtml(t('action.details'))}</button>
       </div>
     </article>
@@ -1076,6 +1116,9 @@ function scheduleCellHtml(bookings, dock, slot) {
   }
 
   const first = bookings[0];
+  if (first.anonymous) {
+    return `<td class="schedule-cell is-busy"><span class="schedule-slot schedule-unavailable">${escapeHtml(t('schedule.busy'))}</span></td>`;
+  }
   const label = bookings.map((a) => a.truck_plate).join(' · ');
   return `<td class="schedule-cell is-busy">
     <button type="button" class="schedule-slot" data-action="detail" data-id="${first.id}"
@@ -1088,12 +1131,16 @@ function scheduleCellHtml(bookings, dock, slot) {
 
 function renderSchedule() {
   const host = $('#scheduleGrid');
+  const customerMode = state.user && state.user.role === 'customer';
   const rows = state.schedule.rows.filter((a) => a.status !== 'cancelled');
+  const scheduleRows = customerMode ? state.schedule.busy.map((a) => ({ ...a, anonymous: true })) : rows;
   const dockIds = new Set(rows.filter((a) => a.dock_id != null).map((a) => String(a.dock_id)));
-  const docks = state.options.docks.filter((d) => d.is_active || dockIds.has(String(d.id)));
+  const docks = customerMode
+    ? state.schedule.docks
+    : state.options.docks.filter((d) => d.is_active || dockIds.has(String(d.id)));
   const bookings = new Map();
 
-  for (const appointment of rows) {
+  for (const appointment of scheduleRows) {
     if (!appointment.dock_id) continue;
     const local = isoLocalDateTime(appointment.planned_at);
     if (!local || !local.startsWith(state.schedule.date)) continue;
@@ -1106,7 +1153,7 @@ function renderSchedule() {
     bookings.get(key).push(appointment);
   }
 
-  const unassigned = rows.filter((a) => !a.dock_id).length;
+  const unassigned = customerMode ? 0 : rows.filter((a) => !a.dock_id).length;
   if (!docks.length) {
     host.innerHTML = `<div class="empty-state"><strong>${escapeHtml(t('empty.title'))}</strong><span>${escapeHtml(t('admin.docks'))}</span></div>`;
     return;
@@ -1137,8 +1184,17 @@ function shiftTime(time, minutes) {
 async function loadSchedule() {
   setLive('loading');
   try {
-    const data = await api(`/api/appointments?date=${encodeURIComponent(state.schedule.date)}&limit=500&sort=planned_at&dir=asc`);
-    state.schedule.rows = data.appointments;
+    if (state.user && state.user.role === 'customer') {
+      const data = await api(`/api/appointments/availability?date=${encodeURIComponent(state.schedule.date)}`);
+      state.schedule.rows = [];
+      state.schedule.busy = data.busy;
+      state.schedule.docks = data.docks;
+    } else {
+      const data = await api(`/api/appointments?date=${encodeURIComponent(state.schedule.date)}&limit=500&sort=planned_at&dir=asc`);
+      state.schedule.rows = data.appointments;
+      state.schedule.busy = [];
+      state.schedule.docks = [];
+    }
     $('#scheduleDate').value = state.schedule.date;
     renderSchedule();
     setLive('');
@@ -1327,6 +1383,10 @@ function openApptForm(appt, defaults = {}) {
   $('#apptModalTitle').textContent = appt ? t('form.editTitle') : t('form.newTitle');
   $('#apptFormError').hidden = true;
   $('#apptId').value = appt ? appt.id : '';
+  const customerBooking = state.user && state.user.role === 'customer' && !appt;
+  $('#documentField').hidden = !customerBooking;
+  $('#fDocument').required = customerBooking;
+  $('#fDocument').value = '';
 
   const defaultPlanned = defaults.plannedAt || (state.dashboard.filters.date && state.dashboard.filters.date !== isoDate()
     ? `${state.dashboard.filters.date}T08:00`
@@ -1374,7 +1434,18 @@ async function saveAppointment() {
   const btn = $('#apptSaveBtn');
   btn.disabled = true;
   try {
-    if (id) await api(`/api/appointments/${id}`, { method: 'PUT', body });
+    if (state.user.role === 'customer' && !id) {
+      const file = $('#fDocument').files[0];
+      if (!file) {
+        errBox.textContent = t('form.documentRequired');
+        errBox.hidden = false;
+        return;
+      }
+      const form = new FormData();
+      Object.entries(body).forEach(([key, value]) => form.append(key, value == null ? '' : String(value)));
+      form.append('document', file);
+      await apiForm('/api/appointments/booking', form);
+    } else if (id) await api(`/api/appointments/${id}`, { method: 'PUT', body });
     else await api('/api/appointments', { method: 'POST', body });
 
     closeModal('apptModal');
@@ -1464,6 +1535,15 @@ async function openDetail(id) {
             </div>
           </div>`).join('')
       : `<p class="muted">${escapeHtml(t('detail.noEvents'))}</p>`;
+    const documents = data.documents || [];
+    const documentsHtml = documents.length
+      ? `<div><div class="detail-section-title">${escapeHtml(t('form.documents'))}</div>
+           <div class="document-list">${documents.map((doc) => `
+             <a class="document-link" href="/api/appointments/${a.id}/documents/${doc.id}/download">
+               ${escapeHtml(doc.original_name)} <span>${escapeHtml(formatFileSize(doc.size_bytes))}</span>
+             </a>`).join('')}</div>
+         </div>`
+      : '';
 
     $('#detailBody').innerHTML = `
       <div class="detail-grid">
@@ -1474,17 +1554,38 @@ async function openDetail(id) {
           </div>`).join('')}
       </div>
       ${a.notes ? `<div><div class="detail-section-title">${escapeHtml(t('form.notes'))}</div><p>${escapeHtml(a.notes)}</p></div>` : ''}
+      ${documentsHtml}
       <div>
         <div class="detail-section-title">${escapeHtml(t('detail.timeline'))}</div>
         <div class="timeline">${timeline}</div>
       </div>`;
 
     $('#detailFoot').innerHTML = `
-      <button class="btn" data-action="edit-appt" data-id="${a.id}">${escapeHtml(t('action.edit'))}</button>
-      <button class="btn btn-primary" data-action="status" data-id="${a.id}">${escapeHtml(t('action.status'))}</button>`;
+      ${state.user.role !== 'customer' ? `<label class="btn btn-ghost">${escapeHtml(t('form.uploadDocument'))}<input class="detail-document-input" data-id="${a.id}" type="file" hidden accept="application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" /></label>` : ''}
+      ${state.user.role !== 'customer' || a.status === 'planned' ? `<button class="btn" data-action="edit-appt" data-id="${a.id}">${escapeHtml(t('action.edit'))}</button>` : ''}
+      ${state.user.role !== 'customer' ? `<button class="btn btn-primary" data-action="status" data-id="${a.id}">${escapeHtml(t('action.status'))}</button>` : ''}`;
 
     state.detailAppt = a;
     openModal('detailModal');
+  } catch (err) {
+    toast(errorMessage(err), 'error');
+  }
+}
+
+function formatFileSize(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function uploadAppointmentDocument(id, file) {
+  if (!file) return;
+  const form = new FormData();
+  form.append('document', file);
+  try {
+    await apiForm(`/api/appointments/${id}/documents`, form);
+    toast(t('form.saved'), 'ok');
+    openDetail(id);
   } catch (err) {
     toast(errorMessage(err), 'error');
   }
@@ -1701,6 +1802,9 @@ async function showApp(user) {
   $('#userRole').textContent = t(`role.${user.role}`);
   $('#userRole').className = `user-role badge badge-${user.role === 'admin' ? 'in_progress' : 'planned'}`;
   $$('.admin-only').forEach((el) => { el.hidden = user.role !== 'admin'; });
+  $$('.customer-hidden').forEach((el) => { el.hidden = user.role === 'customer'; });
+  const dashboardTab = $('#mainTabs [data-view="dashboard"]');
+  dashboardTab.textContent = user.role === 'customer' ? t('nav.myBookings') : t('nav.dashboard');
 
   await refreshOptions();
   // Numatytieji filtrai tik jau zinant sandelio laiko juosta.
@@ -1896,6 +2000,7 @@ function bindEvents() {
     applyStaticTranslations();
     if (state.user) {
       $('#userRole').textContent = t(`role.${state.user.role}`);
+      $('#mainTabs [data-view="dashboard"]').textContent = state.user.role === 'customer' ? t('nav.myBookings') : t('nav.dashboard');
       setView(state.view);
     }
   });
@@ -1959,6 +2064,11 @@ function bindEvents() {
 
   // Filtrų pakeitimai (vienas delegatas visiems rodiniams)
   document.addEventListener('change', (e) => {
+    const documentInput = e.target.closest('.detail-document-input');
+    if (documentInput) {
+      uploadAppointmentDocument(documentInput.dataset.id, documentInput.files[0]);
+      return;
+    }
     const scheduleDate = e.target.closest('[data-schedule-date]');
     if (scheduleDate) {
       state.schedule.date = scheduleDate.value || isoDate();

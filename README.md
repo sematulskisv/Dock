@@ -33,7 +33,9 @@ Built to be used on a **warehouse tablet** as well as on a desk browser.
 
 | Requirement | Where |
 |---|---|
-| Login with two roles (administrator / warehouse operator) | `routes/auth.js`, `middleware/auth.js` |
+| Login with three roles (administrator / warehouse operator / customer) | `routes/auth.js`, `middleware/auth.js` |
+| Customer self-service booking | Customer selects a free 30-minute dock slot, fills in vehicle data and must attach a PDF, image or Excel document |
+| Customer booking tracking | "Mano rezervacijos" shows only the customer's own visits, their live status timeline and available documents |
 | Dashboard with today's truck appointments | "Šiandien" tab |
 | Full appointment record (arrival time, operation, plates, driver, carrier, customer, reference, dock, notes) | `appointments` table |
 | Eight statuses | Planned, Arrived, Waiting, At dock, Loading/unloading, Completed, Departed, Cancelled |
@@ -149,6 +151,7 @@ All settings come from `.env` (see `.env.example`).
 | `APP_TIMEZONE` | `Europe/Vilnius` | Warehouse timezone; decides where "today" starts |
 | `WAITING_ALERT_MINUTES` | `30` | Waiting longer than this is highlighted |
 | `LATE_GRACE_MINUTES` | `0` | Tolerance before a truck counts as delayed |
+| `UPLOAD_MAX_MB` | `15` | Maximum size of one attached PDF, image or Excel file (MB) |
 | `COOKIE_SECURE` | `false` | Set `true` when serving over HTTPS |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | — | Used only by `npm run seed` |
 
@@ -194,7 +197,7 @@ Application accounts.
 | `id` | `INT UNSIGNED AUTO_INCREMENT` | |
 | `email` | `VARCHAR(190)` unique | login identifier, stored lowercase |
 | `full_name` | `VARCHAR(160)` | shown in the UI and in the audit log |
-| `role` | `VARCHAR(16)` | `admin` or `operator` (validated in the app) |
+| `role` | `VARCHAR(16)` | `admin`, `operator` or `customer` (validated in the app) |
 | `password_hash`, `password_salt` | `VARCHAR` | scrypt, 64 bytes, per-user salt |
 | `is_active` | `TINYINT(1)` | disabling a user revokes their sessions |
 | `last_login_at`, `created_at`, `updated_at` | `DATETIME` (UTC) | |
@@ -252,6 +255,19 @@ Append-only history of every status change — this is what the audit page reads
 | `changed_by` | FK → `users` — **which user changed the status** |
 | `changed_at` | `DATETIME` (UTC) |
 
+### `appointment_documents`
+Documents are stored outside the public web directory and are available only through
+an authenticated appointment download endpoint. A customer must attach the first
+document when creating a booking; warehouse users can add follow-up documents, for
+example an unloading confirmation.
+
+| Column | Notes |
+|---|---|
+| `appointment_id` | FK, `ON DELETE CASCADE` |
+| `storage_name` | random server-side filename; never exposed as a public path |
+| `original_name`, `mime_type`, `size_bytes` | download metadata |
+| `uploaded_by`, `created_at` | uploader and upload time |
+
 ### `audit_log`
 Wider audit trail: appointment create/update/delete, CSV exports, user and dock
 management, logins, failed logins and logouts.
@@ -282,6 +298,19 @@ planned ──> arrived ──> waiting ──> at_dock ──> in_progress ─�
 Operators are limited to the transitions above (enforced server-side in
 `lib/appointments.js`). **Administrators may set any status**, which is recorded in the
 audit log like any other change.
+
+### Customer bookings
+
+- An administrator creates a user with the **Customer** role.
+- Customers see the dock schedule without any other carrier's personal or vehicle data.
+- A free slot opens the booking form. The selected dock is required and the slot is
+  reserved atomically, so two customers cannot take the same 30-minute slot.
+- A booking cannot be submitted without a PDF, JPG, PNG or Excel attachment. The
+  maximum file size is `UPLOAD_MAX_MB` (15 MB by default).
+- Customers can see and edit only their own planned bookings. They cannot change a
+  vehicle status, view audit logs, export CSV or access any other customer's booking.
+- Warehouse operators and administrators can add documents after unloading; the
+  customer can download documents attached to their own booking.
 
 ### Alerts
 
@@ -347,9 +376,13 @@ Authentication is the httpOnly cookie `wops_sid`; the frontend uses
 | GET | `/api/appointments` | filters below; `{appointments, total, limit, offset}` |
 | GET | `/api/appointments/stats` | same filters; counters incl. `delayed`, `waiting_long` |
 | GET | `/api/appointments/options` | docks, distinct customers/carriers, thresholds |
-| GET | `/api/appointments/:id` | `{appointment, events, audit}` |
+| GET | `/api/appointments/availability?date=YYYY-MM-DD` | active docks and occupied slots only, without personal data |
+| GET | `/api/appointments/:id` | `{appointment, events, audit, documents}` |
 | POST | `/api/appointments` | create (status starts as `planned`) |
+| POST | `/api/appointments/booking` | customer-only multipart booking; `document` attachment is required |
 | PUT | `/api/appointments/:id` | partial update; status is **not** editable here |
+| POST | `/api/appointments/:id/documents` | multipart follow-up document (`document`) |
+| GET | `/api/appointments/:id/documents/:documentId/download` | authenticated document download |
 | POST | `/api/appointments/:id/status` | `{status, note?}` → writes timestamp + `status_events` + audit |
 | DELETE | `/api/appointments/:id` | **admin only** |
 
@@ -462,7 +495,8 @@ This is the intended target and needs no external services.
    WAITING_ALERT_MINUTES=30
    ```
    Shared plans often cap simultaneous MySQL connections — keep `DB_POOL_SIZE` small.
-4. **Build / start commands:** `npm install`, then `npm start`.
+4. **Build / start commands:** `npm install`, then `npm start`. The process must have
+   write access to the project's `uploads/` directory for attached documents.
    The schema is created automatically on first start; there is no separate migration
    step and no shell access required.
 5. **Create the first admin.** With SSH:
@@ -518,7 +552,8 @@ migration step for additive changes.
 
 ### Backups
 
-Nothing is stored outside MySQL, so a dump is a complete backup:
+Booking data is stored in MySQL and attached documents are stored in the project's
+`uploads/` directory. Back up both:
 
 ```bash
 mysqldump --single-transaction --routines -u warehouse -p warehouse_ops > warehouse_ops.sql

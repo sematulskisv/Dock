@@ -129,6 +129,25 @@ CREATE TABLE IF NOT EXISTS status_events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------
+-- Prisegti krovinio / pakrovimo dokumentai
+-- ---------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS appointment_documents (
+  id             INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  appointment_id INT UNSIGNED NOT NULL,
+  storage_name   VARCHAR(120) NOT NULL,
+  original_name  VARCHAR(255) NOT NULL,
+  mime_type      VARCHAR(100) NOT NULL,
+  size_bytes     INT UNSIGNED NOT NULL,
+  uploaded_by    INT UNSIGNED NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_document_storage_name (storage_name),
+  KEY idx_documents_appointment (appointment_id, created_at),
+  CONSTRAINT fk_documents_appointment FOREIGN KEY (appointment_id) REFERENCES appointments(id) ON DELETE CASCADE,
+  CONSTRAINT fk_documents_user FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------
 -- Bendras audito zurnalas (sukurimas, redagavimas, trynimas, prisijungimai)
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS audit_log (

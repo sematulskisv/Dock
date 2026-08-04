@@ -1,6 +1,10 @@
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
 const db = require('../db');
 const { requireAuth, requireAdmin, clientIp } = require('../middleware/auth');
 const A = require('../lib/appointments');
@@ -8,6 +12,61 @@ const A = require('../lib/appointments');
 const router = express.Router();
 
 router.use(requireAuth);
+
+const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
+const MAX_UPLOAD_BYTES = (Number(process.env.UPLOAD_MAX_MB) || 15) * 1024 * 1024;
+const ACCEPTED_MIME_TYPES = new Set([
+  'application/pdf', 'image/jpeg', 'image/png',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+]);
+
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, done) => done(null, UPLOAD_DIR),
+  filename: (req, file, done) => {
+    const ext = path.extname(file.originalname || '').toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 12);
+    done(null, `${crypto.randomBytes(20).toString('hex')}${ext}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
+  fileFilter: (req, file, done) => {
+    if (!ACCEPTED_MIME_TYPES.has(file.mimetype)) return done(new Error('invalid_document'));
+    return done(null, true);
+  },
+});
+
+function uploadSingle(req, res, next) {
+  upload.single('document')(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'file_too_large' });
+    return res.status(400).json({ error: 'invalid_document' });
+  });
+}
+
+function isCustomer(req) {
+  return req.user && req.user.role === 'customer';
+}
+
+function scopedFilters(req, query) {
+  const result = A.buildFilters(query);
+  if (!isCustomer(req)) return result;
+  return {
+    whereSql: result.whereSql ? `${result.whereSql} AND a.created_by = ?` : 'WHERE a.created_by = ?',
+    params: [...result.params, req.user.id],
+  };
+}
+
+function canAccessAppointment(req, appointment) {
+  return !isCustomer(req) || Number(appointment.created_by) === Number(req.user.id);
+}
+
+function removeUploadedFile(file) {
+  if (file && file.path) fs.unlink(file.path, () => {});
+}
 
 // ---------------------------------------------------------------------
 // Validacija
@@ -107,6 +166,29 @@ async function checkDock(client, dockId, appointmentId = null, requireFree = fal
     : null;
 }
 
+async function checkReservationSlot(client, dockId, plannedAt, appointmentId = null) {
+  if (!dockId || !plannedAt) return null;
+  const start = new Date(plannedAt);
+  const startWindow = new Date(start.getTime() - 30 * 60 * 1000);
+  const endWindow = new Date(start.getTime() + 30 * 60 * 1000);
+  const occupied = await client.query(
+    `SELECT id FROM appointments
+      WHERE dock_id = ? AND status <> 'cancelled' AND planned_at > ? AND planned_at < ? AND id <> ?
+      FOR UPDATE`,
+    [dockId, startWindow, endWindow, appointmentId || 0]
+  );
+  return occupied.rows[0] ? { error: 'reservation_occupied', appointmentId: occupied.rows[0].id } : null;
+}
+
+async function addDocument(client, appointmentId, file, userId) {
+  await client.query(
+    `INSERT INTO appointment_documents
+       (appointment_id, storage_name, original_name, mime_type, size_bytes, uploaded_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+    [appointmentId, file.filename, String(file.originalname || 'document').slice(0, 255), file.mimetype, file.size, userId]
+  );
+}
+
 // ---------------------------------------------------------------------
 // GET /api/appointments/options - reiksmes filtru sarasams
 // (turi buti pries /:id)
@@ -115,10 +197,14 @@ router.get('/options', async (req, res) => {
   try {
     const [docks, customers, carriers] = await Promise.all([
       db.query('SELECT id, code, name, is_active FROM docks ORDER BY sort_order, code'),
-      db.query(`SELECT DISTINCT customer AS value FROM appointments
-                 WHERE customer IS NOT NULL AND customer <> '' ORDER BY customer`),
-      db.query(`SELECT DISTINCT carrier AS value FROM appointments
-                 WHERE carrier IS NOT NULL AND carrier <> '' ORDER BY carrier`),
+      isCustomer(req)
+        ? Promise.resolve({ rows: [] })
+        : db.query(`SELECT DISTINCT customer AS value FROM appointments
+                    WHERE customer IS NOT NULL AND customer <> '' ORDER BY customer`),
+      isCustomer(req)
+        ? Promise.resolve({ rows: [] })
+        : db.query(`SELECT DISTINCT carrier AS value FROM appointments
+                    WHERE carrier IS NOT NULL AND carrier <> '' ORDER BY carrier`),
     ]);
     res.json({
       docks: docks.rows,
@@ -136,12 +222,33 @@ router.get('/options', async (req, res) => {
   }
 });
 
+// GET /api/appointments/availability - klientui tik uzimtumo faktas, be kitu vežėjų duomenų
+router.get('/availability', async (req, res) => {
+  const date = String(req.query.date || '');
+  const { whereSql, params } = A.buildFilters({ date });
+  if (!whereSql) return res.status(400).json({ error: 'invalid_date' });
+  try {
+    const { rows } = await db.query(
+      `SELECT a.dock_id, a.planned_at
+         FROM appointments a
+        ${whereSql} AND a.status <> 'cancelled' AND a.dock_id IS NOT NULL
+        ORDER BY a.planned_at ASC`,
+      params
+    );
+    const docks = await db.query('SELECT id, code, name FROM docks WHERE is_active = 1 ORDER BY sort_order, code');
+    res.json({ docks: docks.rows, busy: rows });
+  } catch (err) {
+    console.error('[appointments] availability klaida:', err.message);
+    res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // ---------------------------------------------------------------------
 // GET /api/appointments - sarasas su filtrais
 // ---------------------------------------------------------------------
 router.get('/', async (req, res) => {
   try {
-    const { whereSql, params } = A.buildFilters(req.query);
+    const { whereSql, params } = scopedFilters(req, req.query);
     const { limit, offset } = pageParams(req.query);
 
     const sortable = {
@@ -195,7 +302,7 @@ router.get('/', async (req, res) => {
 // ---------------------------------------------------------------------
 router.get('/stats', async (req, res) => {
   try {
-    const { whereSql, params } = A.buildFilters(req.query);
+    const { whereSql, params } = scopedFilters(req, req.query);
     const sql = `
       SELECT
         COUNT(*) AS total,
@@ -236,6 +343,7 @@ router.get('/:id', async (req, res) => {
   try {
     const appointment = await fetchOne(id);
     if (!appointment) return res.status(404).json({ error: 'not_found' });
+    if (!canAccessAppointment(req, appointment)) return res.status(404).json({ error: 'not_found' });
 
     const events = await db.query(
       `SELECT e.*, u.full_name AS changed_by_name, u.email AS changed_by_email
@@ -255,11 +363,19 @@ router.get('/:id', async (req, res) => {
         LIMIT 100`,
       [id]
     );
+    const documents = await db.query(
+      `SELECT id, original_name, mime_type, size_bytes, created_at
+         FROM appointment_documents
+        WHERE appointment_id = ?
+        ORDER BY created_at ASC, id ASC`,
+      [id]
+    );
 
     res.json({
       appointment,
       events: events.rows,
-      audit: audit.rows.map((r) => ({ ...r, details: db.parseDetails(r.details) })),
+      audit: isCustomer(req) ? [] : audit.rows.map((r) => ({ ...r, details: db.parseDetails(r.details) })),
+      documents: documents.rows,
     });
   } catch (err) {
     console.error('[appointments] detalu klaida:', err);
@@ -270,7 +386,68 @@ router.get('/:id', async (req, res) => {
 // ---------------------------------------------------------------------
 // POST /api/appointments - naujas vizitas
 // ---------------------------------------------------------------------
+router.post('/booking', uploadSingle, async (req, res) => {
+  if (!isCustomer(req)) {
+    removeUploadedFile(req.file);
+    return res.status(403).json({ error: 'customer_only' });
+  }
+  if (!req.file) return res.status(400).json({ error: 'attachment_required' });
+
+  const { errors, data } = validateBody(req.body || {});
+  if (errors.length) {
+    removeUploadedFile(req.file);
+    return res.status(400).json({ error: 'validation_failed', fields: errors });
+  }
+
+  try {
+    const created = await db.withTransaction(async (client) => {
+      const dockProblem = await checkDock(client, data.dock_id);
+      if (dockProblem) return { conflict: dockProblem };
+      const reservationProblem = await checkReservationSlot(client, data.dock_id, data.planned_at);
+      if (reservationProblem) return { conflict: reservationProblem };
+
+      const insert = await client.query(
+        `INSERT INTO appointments
+           (planned_at, operation, truck_plate, trailer_plate, driver_name, driver_phone,
+            carrier, customer, reference, dock_id, notes, status,
+            created_by, updated_by, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,'planned',?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())`,
+        [
+          data.planned_at, data.operation, data.truck_plate, data.trailer_plate ?? null,
+          data.driver_name ?? null, data.driver_phone ?? null, data.carrier ?? null,
+          data.customer ?? null, data.reference ?? null, data.dock_id,
+          data.notes ?? null, req.user.id, req.user.id,
+        ]
+      );
+      const appointmentId = insert.insertId;
+      await client.query(
+        `INSERT INTO status_events (appointment_id, from_status, to_status, note, changed_by, changed_at)
+         VALUES (?, NULL, 'planned', ?, ?, UTC_TIMESTAMP())`,
+        [appointmentId, 'Kliento rezervacija', req.user.id]
+      );
+      await addDocument(client, appointmentId, req.file, req.user.id);
+      await db.writeAudit({
+        entity: 'appointment', entityId: appointmentId, action: 'create',
+        details: { truckPlate: data.truck_plate, plannedAt: data.planned_at, operation: data.operation, customerBooking: true },
+        userId: req.user.id, ip: clientIp(req),
+      }, client);
+      return { appointment: await fetchOne(appointmentId, client) };
+    });
+
+    if (created.conflict) {
+      removeUploadedFile(req.file);
+      return res.status(409).json(created.conflict);
+    }
+    return res.status(201).json(created);
+  } catch (err) {
+    removeUploadedFile(req.file);
+    console.error('[appointments] kliento rezervacijos klaida:', err.message);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
 router.post('/', async (req, res) => {
+  if (isCustomer(req)) return res.status(403).json({ error: 'use_booking_endpoint' });
   const { errors, data } = validateBody(req.body || {});
   if (errors.length) return res.status(400).json({ error: 'validation_failed', fields: errors });
 
@@ -342,6 +519,12 @@ router.put('/:id', async (req, res) => {
     const updated = await db.withTransaction(async (client) => {
       const before = await client.query('SELECT * FROM appointments WHERE id = ? FOR UPDATE', [id]);
       if (!before.rows[0]) return null;
+      if (isCustomer(req) && Number(before.rows[0].created_by) !== Number(req.user.id)) {
+        return { notFound: true };
+      }
+      if (isCustomer(req) && before.rows[0].status !== 'planned') {
+        return { conflict: { error: 'customer_edit_not_allowed' } };
+      }
 
       const nextDockId = Object.prototype.hasOwnProperty.call(data, 'dock_id')
         ? data.dock_id
@@ -357,6 +540,11 @@ router.put('/:id', async (req, res) => {
       } else if (Object.prototype.hasOwnProperty.call(data, 'dock_id') && nextDockId) {
         const dockProblem = await checkDock(client, nextDockId);
         if (dockProblem) return { conflict: dockProblem };
+      }
+      if (isCustomer(req)) {
+        const nextPlannedAt = data.planned_at || before.rows[0].planned_at;
+        const reservationProblem = await checkReservationSlot(client, nextDockId, nextPlannedAt, id);
+        if (reservationProblem) return { conflict: reservationProblem };
       }
 
       const sets = keys.map((k) => `${k} = ?`);
@@ -391,7 +579,7 @@ router.put('/:id', async (req, res) => {
       return { appointment: await fetchOne(id, client) };
     });
 
-    if (!updated) return res.status(404).json({ error: 'not_found' });
+    if (!updated || updated.notFound) return res.status(404).json({ error: 'not_found' });
     if (updated.conflict) return res.status(409).json(updated.conflict);
     res.json(updated);
   } catch (err) {
@@ -400,10 +588,67 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// POST /api/appointments/:id/documents - papildomas dokumentas (pvz. iškrovimo PDF)
+router.post('/:id/documents', uploadSingle, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    removeUploadedFile(req.file);
+    return res.status(400).json({ error: 'bad_id' });
+  }
+  if (!req.file) return res.status(400).json({ error: 'attachment_required' });
+
+  try {
+    const appointment = await fetchOne(id);
+    if (!appointment || !canAccessAppointment(req, appointment)) {
+      removeUploadedFile(req.file);
+      return res.status(404).json({ error: 'not_found' });
+    }
+    await db.withTransaction(async (client) => {
+      await addDocument(client, id, req.file, req.user.id);
+      await db.writeAudit({
+        entity: 'appointment', entityId: id, action: 'document_upload',
+        details: { fileName: req.file.originalname, truckPlate: appointment.truck_plate },
+        userId: req.user.id, ip: clientIp(req),
+      }, client);
+    });
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    removeUploadedFile(req.file);
+    console.error('[appointments] dokumento ikelimo klaida:', err.message);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// GET /api/appointments/:id/documents/:documentId/download
+router.get('/:id/documents/:documentId/download', async (req, res) => {
+  const id = Number(req.params.id);
+  const documentId = Number(req.params.documentId);
+  if (!Number.isInteger(id) || !Number.isInteger(documentId)) return res.status(400).json({ error: 'bad_id' });
+  try {
+    const appointment = await fetchOne(id);
+    if (!appointment || !canAccessAppointment(req, appointment)) return res.status(404).json({ error: 'not_found' });
+    const { rows } = await db.query(
+      'SELECT storage_name, original_name FROM appointment_documents WHERE id = ? AND appointment_id = ?',
+      [documentId, id]
+    );
+    const document = rows[0];
+    if (!document || path.basename(document.storage_name) !== document.storage_name) {
+      return res.status(404).json({ error: 'not_found' });
+    }
+    const filePath = path.join(UPLOAD_DIR, document.storage_name);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'file_missing' });
+    return res.download(filePath, document.original_name);
+  } catch (err) {
+    console.error('[appointments] dokumento parsisiuntimo klaida:', err.message);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
 // ---------------------------------------------------------------------
 // POST /api/appointments/:id/status - busenos keitimas + laiko zyma
 // ---------------------------------------------------------------------
 router.post('/:id/status', async (req, res) => {
+  if (isCustomer(req)) return res.status(403).json({ error: 'customer_cannot_change_status' });
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_id' });
 

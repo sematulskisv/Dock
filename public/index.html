@@ -54,8 +54,8 @@
     <nav class="tabs" id="mainTabs" role="tablist">
       <button class="tab is-active" data-view="dashboard" data-i18n="nav.dashboard">Šiandien</button>
       <button class="tab" data-view="schedule" data-i18n="nav.schedule">Tvarkaraštis</button>
-      <button class="tab" data-view="history" data-i18n="nav.history">Istorija</button>
-      <button class="tab" data-view="audit" data-i18n="nav.audit">Auditas</button>
+      <button class="tab customer-hidden" data-view="history" data-i18n="nav.history">Istorija</button>
+      <button class="tab customer-hidden" data-view="audit" data-i18n="nav.audit">Auditas</button>
       <button class="tab admin-only" data-view="admin" data-i18n="nav.admin">Nustatymai</button>
     </nav>
 
@@ -84,11 +84,11 @@
       <div class="toolbar">
         <div class="toolbar-filters" id="filtersDashboard"></div>
         <div class="toolbar-actions">
-          <button class="btn btn-ghost" id="exportBtnDash">
+          <button class="btn btn-ghost customer-hidden" id="exportBtnDash">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span data-i18n="action.exportCsv">CSV</span>
           </button>
-          <button class="btn btn-primary" id="newApptBtn">
+          <button class="btn btn-primary customer-hidden" id="newApptBtn">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             <span data-i18n="action.new">Naujas vizitas</span>
           </button>
@@ -121,7 +121,7 @@
       <div class="toolbar">
         <div class="toolbar-filters" id="filtersHistory"></div>
         <div class="toolbar-actions">
-          <button class="btn btn-ghost" id="exportBtnHistory">
+          <button class="btn btn-ghost customer-hidden" id="exportBtnHistory">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span data-i18n="action.exportCsv">CSV</span>
           </button>
@@ -247,6 +247,12 @@
         <textarea id="fNotes" rows="3" maxlength="2000"></textarea>
       </label>
 
+      <label class="field field-full" id="documentField" hidden>
+        <span data-i18n="form.document">Prisegtas dokumentas</span>
+        <input type="file" id="fDocument" accept="application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" />
+        <small class="hint" data-i18n="form.documentHint">PDF, JPG, PNG arba Excel failas. Kliento registracijai privaloma.</small>
+      </label>
+
       <p class="form-error field-full" id="apptFormError" role="alert" hidden></p>
     </form>
 
@@ -318,6 +324,7 @@
         <span data-i18n="admin.role">Rolė</span>
         <select id="uRole">
           <option value="operator" data-i18n="role.operator">Sandėlio operatorius</option>
+          <option value="customer" data-i18n="role.customer">Klientas</option>
           <option value="admin" data-i18n="role.admin">Administratorius</option>
         </select>
       </label>

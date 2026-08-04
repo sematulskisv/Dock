@@ -7,7 +7,7 @@ const { requireAdmin, clientIp } = require('../middleware/auth');
 const router = express.Router();
 router.use(requireAdmin);
 
-const ROLES = ['admin', 'operator'];
+const ROLES = ['admin', 'operator', 'customer'];
 
 const isDuplicate = (err) => err && (err.code === 'ER_DUP_ENTRY' || err.errno === 1062);
 
