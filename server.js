@@ -57,6 +57,17 @@ function explainDbError(err) {
   }
 }
 
+/**
+ * MySQL pranesimas atrodo taip:
+ *   Access denied for user 'vardas'@'10.1.2.3' (using password: YES)
+ * Jame yra du labai svarbus dalykai: is kokio HOSTO serveris mato prisijungima
+ * ir ar slaptazodis apskritai buvo issiustas. Vartotojo varda uzdengiam.
+ */
+function sanitizeDbError(message) {
+  if (!message) return null;
+  return String(message).replace(/'[^']*'@/g, "'***'@").slice(0, 200);
+}
+
 async function tryInitDb() {
   dbState.attempts += 1;
   try {
@@ -159,6 +170,11 @@ app.get('/api/health', async (req, res) => {
           return typeof value === 'string' && value !== value.trim();
         });
       if (padded.length) body.whitespace = padded;
+
+      // Pats MySQL pranesimas (be vartotojo vardo) - jame matyti hostas,
+      // kuri serveris priskiria prisijungimui, ir ar slaptazodis issiustas.
+      const detail = sanitizeDbError(dbState.lastError);
+      if (detail) body.detail = detail;
     }
 
     return res.status(503).json(body);
