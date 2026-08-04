@@ -16,6 +16,7 @@ const I18N = {
     'login.rateLimited': 'Per daug bandymų. Pabandykite vėliau.',
 
     'nav.dashboard': 'Šiandien',
+    'nav.schedule': 'Tvarkaraštis',
     'nav.history': 'Istorija',
     'nav.audit': 'Auditas',
     'nav.admin': 'Nustatymai',
@@ -63,6 +64,13 @@ const I18N = {
     'filter.onlyAlerts': 'Tik problemos',
     'filter.user': 'Naudotojas',
     'filter.reset': 'Išvalyti',
+
+    'schedule.title': 'Vartų tvarkaraštis',
+    'schedule.help': 'Pasirinkite datą. Laisvas laikas atidaro naują vizitą, užimtas — jo detales.',
+    'schedule.time': 'Laikas',
+    'schedule.free': 'Laisva',
+    'schedule.busy': 'Užimta',
+    'schedule.unassigned': 'Nepriskirti vizitai: {n}',
 
     'col.time': 'Laikas',
     'col.operation': 'Operacija',
@@ -191,6 +199,7 @@ const I18N = {
     'login.rateLimited': 'Too many attempts. Try again later.',
 
     'nav.dashboard': 'Today',
+    'nav.schedule': 'Schedule',
     'nav.history': 'History',
     'nav.audit': 'Audit',
     'nav.admin': 'Settings',
@@ -238,6 +247,13 @@ const I18N = {
     'filter.onlyAlerts': 'Alerts only',
     'filter.user': 'User',
     'filter.reset': 'Clear',
+
+    'schedule.title': 'Dock schedule',
+    'schedule.help': 'Choose a date. A free time opens a new appointment; a busy time opens its details.',
+    'schedule.time': 'Time',
+    'schedule.free': 'Available',
+    'schedule.busy': 'Busy',
+    'schedule.unassigned': 'Unassigned appointments: {n}',
 
     'col.time': 'Time',
     'col.operation': 'Operation',
@@ -418,6 +434,7 @@ const state = {
   },
   users: [],
   dashboard: { rows: [], stats: null, filters: {} },
+  schedule: { rows: [], date: '' },
   history: { rows: [], stats: null, total: 0, offset: 0, limit: 50, filters: {} },
   audit: { mode: 'status', rows: [], total: 0, offset: 0, limit: 100, filters: {} },
   statusTarget: null,
@@ -1029,6 +1046,108 @@ async function loadHistory() {
   }
 }
 
+const SCHEDULE_SLOT_MINUTES = 30;
+const SCHEDULE_START_MINUTE = 6 * 60;
+const SCHEDULE_END_MINUTE = 20 * 60;
+
+function scheduleSlots() {
+  const slots = [];
+  for (let minute = SCHEDULE_START_MINUTE; minute < SCHEDULE_END_MINUTE; minute += SCHEDULE_SLOT_MINUTES) {
+    const hour = String(Math.floor(minute / 60)).padStart(2, '0');
+    const min = String(minute % 60).padStart(2, '0');
+    slots.push(`${hour}:${min}`);
+  }
+  return slots;
+}
+
+function shiftIsoDate(date, days) {
+  const [year, month, day] = String(date).split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+function scheduleCellHtml(bookings, dock, slot) {
+  if (!bookings.length) {
+    return `<td class="schedule-cell is-free">
+      <button type="button" class="schedule-slot" data-action="schedule-create"
+        data-date="${escapeHtml(state.schedule.date)}" data-time="${slot}" data-dock-id="${dock.id}">
+        <span>${escapeHtml(t('schedule.free'))}</span>
+      </button>
+    </td>`;
+  }
+
+  const first = bookings[0];
+  const label = bookings.map((a) => a.truck_plate).join(' · ');
+  return `<td class="schedule-cell is-busy">
+    <button type="button" class="schedule-slot" data-action="detail" data-id="${first.id}"
+      title="${escapeHtml(label)}">
+      <span class="schedule-plate">${escapeHtml(first.truck_plate)}</span>
+      ${bookings.length > 1 ? `<span class="schedule-extra">+${bookings.length - 1}</span>` : ''}
+    </button>
+  </td>`;
+}
+
+function renderSchedule() {
+  const host = $('#scheduleGrid');
+  const rows = state.schedule.rows.filter((a) => a.status !== 'cancelled');
+  const dockIds = new Set(rows.filter((a) => a.dock_id != null).map((a) => String(a.dock_id)));
+  const docks = state.options.docks.filter((d) => d.is_active || dockIds.has(String(d.id)));
+  const bookings = new Map();
+
+  for (const appointment of rows) {
+    if (!appointment.dock_id) continue;
+    const local = isoLocalDateTime(appointment.planned_at);
+    if (!local || !local.startsWith(state.schedule.date)) continue;
+    const minutes = Number(local.slice(11, 13)) * 60 + Number(local.slice(14, 16));
+    const slotMinute = Math.floor(minutes / SCHEDULE_SLOT_MINUTES) * SCHEDULE_SLOT_MINUTES;
+    if (slotMinute < SCHEDULE_START_MINUTE || slotMinute >= SCHEDULE_END_MINUTE) continue;
+    const slot = `${String(Math.floor(slotMinute / 60)).padStart(2, '0')}:${String(slotMinute % 60).padStart(2, '0')}`;
+    const key = `${appointment.dock_id}|${slot}`;
+    if (!bookings.has(key)) bookings.set(key, []);
+    bookings.get(key).push(appointment);
+  }
+
+  const unassigned = rows.filter((a) => !a.dock_id).length;
+  if (!docks.length) {
+    host.innerHTML = `<div class="empty-state"><strong>${escapeHtml(t('empty.title'))}</strong><span>${escapeHtml(t('admin.docks'))}</span></div>`;
+    return;
+  }
+
+  host.innerHTML = `
+    ${unassigned ? `<p class="schedule-unassigned">${escapeHtml(t('schedule.unassigned', { n: unassigned }))}</p>` : ''}
+    <div class="schedule-wrap">
+      <table class="schedule-table">
+        <thead><tr>
+          <th class="schedule-time">${escapeHtml(t('schedule.time'))}</th>
+          ${docks.map((d) => `<th>${escapeHtml(d.code)}${d.name ? `<span>${escapeHtml(d.name)}</span>` : ''}</th>`).join('')}
+        </tr></thead>
+        <tbody>${scheduleSlots().map((slot) => `
+          <tr><th class="schedule-time">${slot}–${shiftTime(slot, SCHEDULE_SLOT_MINUTES)}</th>
+            ${docks.map((dock) => scheduleCellHtml(bookings.get(`${dock.id}|${slot}`) || [], dock, slot)).join('')}
+          </tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+}
+
+function shiftTime(time, minutes) {
+  const [hour, minute] = time.split(':').map(Number);
+  const total = hour * 60 + minute + minutes;
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+async function loadSchedule() {
+  setLive('loading');
+  try {
+    const data = await api(`/api/appointments?date=${encodeURIComponent(state.schedule.date)}&limit=500&sort=planned_at&dir=asc`);
+    state.schedule.rows = data.appointments;
+    $('#scheduleDate').value = state.schedule.date;
+    renderSchedule();
+    setLive('');
+  } catch (err) {
+    setLive('error');
+    if (err.code !== 'unauthorized') toast(errorMessage(err), 'error');
+  }
+}
+
 function renderPager(hostId, offset, limit, total, onGo) {
   const host = $(`#${hostId}`);
   if (total <= limit) { host.innerHTML = ''; return; }
@@ -1204,14 +1323,14 @@ function fillFormSelects(selectedDockId) {
   $('#customerOptions').innerHTML = state.options.customers.map((c) => `<option value="${escapeHtml(c)}"></option>`).join('');
 }
 
-function openApptForm(appt) {
+function openApptForm(appt, defaults = {}) {
   $('#apptModalTitle').textContent = appt ? t('form.editTitle') : t('form.newTitle');
   $('#apptFormError').hidden = true;
   $('#apptId').value = appt ? appt.id : '';
 
-  const defaultPlanned = state.dashboard.filters.date && state.dashboard.filters.date !== isoDate()
+  const defaultPlanned = defaults.plannedAt || (state.dashboard.filters.date && state.dashboard.filters.date !== isoDate()
     ? `${state.dashboard.filters.date}T08:00`
-    : isoLocalDateTime(new Date(Math.ceil(Date.now() / (15 * 60000)) * 15 * 60000));
+    : isoLocalDateTime(new Date(Math.ceil(Date.now() / (15 * 60000)) * 15 * 60000)));
 
   $('#fPlannedAt').value = appt ? isoLocalDateTime(appt.planned_at) : defaultPlanned;
   $('#fOperation').value = appt ? appt.operation : 'unloading';
@@ -1224,7 +1343,7 @@ function openApptForm(appt) {
   $('#fReference').value = appt ? (appt.reference || '') : '';
   $('#fNotes').value = appt ? (appt.notes || '') : '';
 
-  fillFormSelects(appt ? appt.dock_id : '');
+  fillFormSelects(appt ? appt.dock_id : (defaults.dockId || ''));
   openModal('apptModal');
   setTimeout(() => $('#fTruckPlate').focus(), 60);
 }
@@ -1507,12 +1626,21 @@ async function saveDock() {
 
 /* -------------------------------------------------------------- navigacija */
 
-function setView(view) {
+function viewFromLocation() {
+  return window.location.pathname.replace(/\/+$/, '') === '/schedule' ? 'schedule' : 'dashboard';
+}
+
+function setView(view, syncUrl = true) {
   state.view = view;
+  if (syncUrl) {
+    const target = view === 'schedule' ? '/schedule' : '/';
+    if (window.location.pathname !== target) window.history.pushState({ view }, '', target);
+  }
   $$('#mainTabs .tab').forEach((tab) => tab.classList.toggle('is-active', tab.dataset.view === view));
   $$('.view').forEach((v) => v.classList.toggle('is-active', v.id === `view-${view}`));
 
   if (view === 'dashboard') { renderDashboardFilters(); loadDashboard(); }
+  if (view === 'schedule') loadSchedule();
   if (view === 'history') { renderHistoryFilters(); loadHistory(); }
   if (view === 'audit') { renderAuditFilters(); loadAudit(); }
   if (view === 'admin') loadAdmin();
@@ -1522,6 +1650,7 @@ function setView(view) {
 
 function refreshCurrentView() {
   if (state.view === 'dashboard') return loadDashboard();
+  if (state.view === 'schedule') return loadSchedule();
   if (state.view === 'history') return loadHistory();
   if (state.view === 'audit') return loadAudit();
   if (state.view === 'admin') return loadAdmin();
@@ -1531,9 +1660,11 @@ function refreshCurrentView() {
 function startAutoRefresh() {
   clearInterval(state.refreshTimer);
   // Automatiškai atnaujinam tik gyvą "Šiandien" rodinį
-  if (state.view !== 'dashboard') return;
+  if (!['dashboard', 'schedule'].includes(state.view)) return;
   state.refreshTimer = setInterval(() => {
-    if (document.visibilityState === 'visible' && !$$('.modal:not([hidden])').length) loadDashboard();
+    if (document.visibilityState !== 'visible' || $$('.modal:not([hidden])').length) return;
+    if (state.view === 'dashboard') loadDashboard();
+    if (state.view === 'schedule') loadSchedule();
   }, 30000);
 }
 
@@ -1574,12 +1705,13 @@ async function showApp(user) {
   await refreshOptions();
   // Numatytieji filtrai tik jau zinant sandelio laiko juosta.
   state.dashboard.filters = { date: isoDate() };
+  state.schedule.date = isoDate();
   state.history.filters = { dateFrom: daysAgo(7), dateTo: isoDate(), statusGroup: 'closed' };
   state.audit.filters = { dateFrom: daysAgo(7), dateTo: isoDate() };
   if (user.role === 'admin') {
     try { state.users = (await api('/api/users')).users; } catch { /* nekritiška */ }
   }
-  setView('dashboard');
+  setView(viewFromLocation(), false);
 }
 
 async function boot() {
@@ -1598,6 +1730,7 @@ async function boot() {
 function findAppt(id) {
   const numId = Number(id);
   return state.dashboard.rows.find((a) => a.id === numId)
+    || state.schedule.rows.find((a) => a.id === numId)
     || state.history.rows.find((a) => a.id === numId)
     || (state.detailAppt && state.detailAppt.id === numId ? state.detailAppt : null);
 }
@@ -1626,6 +1759,18 @@ async function handleAction(action, el) {
     case 'detail':
       closeModal('statusModal');
       openDetail(id);
+      break;
+
+    case 'schedule-create':
+      openApptForm(null, {
+        plannedAt: `${el.dataset.date}T${el.dataset.time}`,
+        dockId: el.dataset.dockId,
+      });
+      break;
+
+    case 'schedule-day':
+      state.schedule.date = shiftIsoDate(state.schedule.date, Number(el.dataset.direction) || 0);
+      loadSchedule();
       break;
 
     case 'edit-appt': {
@@ -1814,6 +1959,12 @@ function bindEvents() {
 
   // Filtrų pakeitimai (vienas delegatas visiems rodiniams)
   document.addEventListener('change', (e) => {
+    const scheduleDate = e.target.closest('[data-schedule-date]');
+    if (scheduleDate) {
+      state.schedule.date = scheduleDate.value || isoDate();
+      loadSchedule();
+      return;
+    }
     const el = e.target.closest('[data-filter]');
     if (!el) return;
     const key = el.dataset.filter;
@@ -1868,9 +2019,15 @@ function bindEvents() {
     if (state.view === 'history') renderAppointmentList('listHistory', state.history.rows);
   }, 200));
 
+  window.addEventListener('popstate', () => {
+    if (state.user) setView(viewFromLocation(), false);
+  });
+
   // Grįžus į skirtuką – iškart atnaujinam
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && state.view === 'dashboard' && state.user) loadDashboard();
+    if (document.visibilityState !== 'visible' || !state.user) return;
+    if (state.view === 'dashboard') loadDashboard();
+    if (state.view === 'schedule') loadSchedule();
   });
 }
 

@@ -433,6 +433,89 @@ select {
   -webkit-overflow-scrolling: touch;
 }
 
+/* ======================================================= DOCK SCHEDULE */
+.schedule-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+.schedule-head h2 { margin: 0; font-size: 18px; }
+.schedule-head p { margin: 4px 0 0; color: var(--text-2); font-size: 13px; }
+.schedule-date-picker { display: flex; align-items: center; gap: 6px; }
+.schedule-date-picker input {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.schedule-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.schedule-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 12px;
+}
+.schedule-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 9px 8px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.schedule-table thead th span { display: block; margin-top: 2px; font-size: 10px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.schedule-table .schedule-time {
+  width: 92px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+.schedule-table tbody th { position: static; border-bottom: 1px solid var(--border); background: var(--surface); }
+.schedule-cell { height: 38px; padding: 0; border: 1px solid var(--border); }
+.schedule-slot {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  font: inherit;
+}
+.schedule-cell.is-free .schedule-slot:hover,
+.schedule-cell.is-free .schedule-slot:focus-visible { background: var(--ok-soft); color: var(--ok); outline: 0; }
+.schedule-cell.is-busy .schedule-slot { background: var(--accent-soft); color: var(--accent-2); }
+.schedule-cell.is-busy .schedule-slot:hover,
+.schedule-cell.is-busy .schedule-slot:focus-visible { background: #ffd7bf; outline: 0; }
+.schedule-plate { font-family: var(--font-mono); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-extra { flex: 0 0 auto; font-size: 10px; font-weight: 700; }
+.schedule-unassigned { margin: 0 0 8px; color: var(--warn); font-size: 12px; font-weight: 650; }
+
 table.data {
   width: 100%;
   border-collapse: collapse;
@@ -870,6 +953,8 @@ tr.row-done td { color: var(--text-2); }
   .toolbar-actions .btn { flex: 1 1 auto; }
   .filter { flex: 1 1 132px; }
   .filter-search { flex: 1 1 100%; }
+  .schedule-head { align-items: stretch; flex-direction: column; }
+  .schedule-date-picker { justify-content: space-between; }
   .form-grid { grid-template-columns: 1fr; }
   .modal { padding: 0; align-items: flex-end; }
   .modal-card {
