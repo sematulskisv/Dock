@@ -467,9 +467,10 @@ This is the intended target and needs no external services.
    step and no shell access required.
 5. **Create the first admin.** With SSH:
    `npm run create-admin -- admin@yourcompany.lt "Name Surname" "StrongPassword"`.
-   Without SSH, run the same command locally with the `.env` pointed at the remote
-   database (enable remote MySQL access for your IP in hPanel first), or temporarily
-   set `SEED_ADMIN_*` and run `npm run seed`.
+   Without SSH, set `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD` and
+   optionally `BOOTSTRAP_ADMIN_NAME` in the Node application environment, then
+   restart it. The account is created only while the `users` table is empty; remove
+   these variables immediately after the first successful login.
 
 Do **not** deploy `docker-compose.yml` — it is only for local development.
 

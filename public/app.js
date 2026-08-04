@@ -412,7 +412,10 @@ const CLOSED = new Set(['completed', 'departed', 'cancelled']);
 const state = {
   user: null,
   view: 'dashboard',
-  options: { docks: [], customers: [], carriers: [], waitingAlertMinutes: 30, lateGraceMinutes: 0 },
+  options: {
+    docks: [], customers: [], carriers: [], waitingAlertMinutes: 30, lateGraceMinutes: 0,
+    timeZone: 'Europe/Vilnius',
+  },
   users: [],
   dashboard: { rows: [], stats: null, filters: {} },
   history: { rows: [], stats: null, total: 0, offset: 0, limit: 50, filters: {} },
@@ -440,18 +443,42 @@ function localeTag() {
   return LANG === 'en' ? 'en-GB' : 'lt-LT';
 }
 
+function warehouseTimeZone() {
+  return state.options.timeZone || 'Europe/Vilnius';
+}
+
+function warehouseParts(value, withTime = false) {
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return null;
+  const options = withTime
+    ? {
+      timeZone: warehouseTimeZone(), hourCycle: 'h23',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }
+    : { timeZone: warehouseTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit' };
+  return Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', options).formatToParts(d)
+      .filter((p) => p.type !== 'literal')
+      .map((p) => [p.type, p.value])
+  );
+}
+
 function fmtTime(value) {
   if (!value) return '';
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return '';
-  return d.toLocaleTimeString(localeTag(), { hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toLocaleTimeString(localeTag(), {
+    timeZone: warehouseTimeZone(), hour: '2-digit', minute: '2-digit', hour12: false,
+  });
 }
 
 function fmtDate(value) {
   if (!value) return '';
   const d = new Date(value);
   if (!Number.isFinite(d.getTime())) return '';
-  return d.toLocaleDateString(localeTag(), { year: 'numeric', month: '2-digit', day: '2-digit' });
+  return d.toLocaleDateString(localeTag(), {
+    timeZone: warehouseTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit',
+  });
 }
 
 function fmtDateTime(value) {
@@ -461,22 +488,37 @@ function fmtDateTime(value) {
 
 /** YYYY-MM-DD vietiniu laiku (input[type=date] reikšmei). */
 function isoDate(date = new Date()) {
-  const d = new Date(date);
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 10);
+  const p = warehouseParts(date);
+  return p ? `${p.year}-${p.month}-${p.day}` : '';
 }
 
 /** YYYY-MM-DDTHH:MM vietiniu laiku (input[type=datetime-local] reikšmei). */
 function isoLocalDateTime(date = new Date()) {
-  const d = new Date(date);
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 16);
+  const p = warehouseParts(date, true);
+  return p ? `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}` : '';
+}
+
+/** datetime-local reiksme sandelio laiku -> UTC ISO data API uzklausai. */
+function warehouseDateTimeToIso(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(value || ''));
+  if (!match) return null;
+  const [year, month, day, hour, minute] = match.slice(1).map(Number);
+  const naiveUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const offsetAt = (instant) => {
+    const p = warehouseParts(instant, true);
+    return Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second))
+      - new Date(instant).getTime();
+  };
+  let timestamp = naiveUtc - offsetAt(new Date(naiveUtc));
+  timestamp = naiveUtc - offsetAt(new Date(timestamp));
+  return new Date(timestamp).toISOString();
 }
 
 function daysAgo(n) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return isoDate(d);
+  const current = isoDate();
+  if (!current) return '';
+  const [year, month, day] = current.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day - n)).toISOString().slice(0, 10);
 }
 
 function debounce(fn, ms = 300) {
@@ -554,6 +596,10 @@ function errorMessage(err) {
     case 'code_exists': return t('error.codeExists');
     case 'weak_password': return t('error.weakPassword');
     case 'transition_not_allowed': return t('status.notAllowed');
+    case 'dock_required': return LANG === 'en' ? 'Choose a dock before starting work.' : 'Prieš pradedant krovą priskirkite vartus.';
+    case 'dock_not_available': return LANG === 'en' ? 'This dock is inactive or no longer exists.' : 'Šie vartai neaktyvūs arba nebeegzistuoja.';
+    case 'dock_occupied': return LANG === 'en' ? 'Another truck is already using this dock.' : 'Prie šių vartų jau yra kitas sunkvežimis.';
+    case 'use_cancelled_status': return LANG === 'en' ? 'Cancel the appointment instead of deleting it.' : 'Vizito netrinkite — pakeiskite jo būseną į „Atšaukta“.\n';
     case 'validation_failed': return t('form.required');
     case 'rate_limited': return t('login.rateLimited');
     default: return t('error.generic');
@@ -932,18 +978,21 @@ async function loadDashboard() {
   setLive('loading');
   try {
     const qs = queryString(state.dashboard.filters);
-    const [list, stats] = await Promise.all([
+    const [listResult, statsResult] = await Promise.allSettled([
       api(`/api/appointments?${qs}&limit=500&sort=planned_at&dir=asc`),
       api(`/api/appointments/stats?${qs}`),
     ]);
+    if (listResult.status === 'rejected') throw listResult.reason;
+    const list = listResult.value;
+    const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
     state.dashboard.rows = list.appointments;
-    state.dashboard.stats = stats.stats;
+    state.dashboard.stats = stats ? stats.stats : null;
     state.options.waitingAlertMinutes = list.waitingAlertMinutes;
     state.options.lateGraceMinutes = list.lateGraceMinutes;
 
-    renderStats('statsRow', stats.stats);
+    renderStats('statsRow', stats ? stats.stats : null);
     renderAppointmentList('listDashboard', list.appointments);
-    setLive('');
+    setLive(stats ? '' : 'error');
   } catch (err) {
     setLive('error');
     if (err.code !== 'unauthorized') toast(errorMessage(err), 'error');
@@ -955,22 +1004,25 @@ async function loadHistory() {
   try {
     const h = state.history;
     const qs = queryString(h.filters);
-    const [list, stats] = await Promise.all([
+    const [listResult, statsResult] = await Promise.allSettled([
       api(`/api/appointments?${qs}&limit=${h.limit}&offset=${h.offset}&sort=planned_at&dir=desc`),
       api(`/api/appointments/stats?${qs}`),
     ]);
+    if (listResult.status === 'rejected') throw listResult.reason;
+    const list = listResult.value;
+    const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
     h.rows = list.appointments;
     h.total = list.total;
-    state.history.stats = stats.stats;
+    state.history.stats = stats ? stats.stats : null;
 
-    renderStats('statsRowHistory', stats.stats);
+    renderStats('statsRowHistory', stats ? stats.stats : null);
     renderAppointmentList('listHistory', list.appointments);
     renderPager('pagerHistory', h.offset, h.limit, h.total, (offset) => {
       h.offset = offset;
       loadHistory();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
-    setLive('');
+    setLive(stats ? '' : 'error');
   } catch (err) {
     setLive('error');
     if (err.code !== 'unauthorized') toast(errorMessage(err), 'error');
@@ -1180,7 +1232,7 @@ function openApptForm(appt) {
 async function saveAppointment() {
   const id = $('#apptId').value;
   const body = {
-    plannedAt: $('#fPlannedAt').value ? new Date($('#fPlannedAt').value).toISOString() : null,
+    plannedAt: warehouseDateTimeToIso($('#fPlannedAt').value),
     operation: $('#fOperation').value,
     truckPlate: $('#fTruckPlate').value.trim(),
     trailerPlate: $('#fTrailerPlate').value.trim(),
@@ -1309,7 +1361,6 @@ async function openDetail(id) {
       </div>`;
 
     $('#detailFoot').innerHTML = `
-      ${state.user.role === 'admin' ? `<button class="btn btn-danger" data-action="delete-appt" data-id="${a.id}">${escapeHtml(t('action.delete'))}</button>` : ''}
       <button class="btn" data-action="edit-appt" data-id="${a.id}">${escapeHtml(t('action.edit'))}</button>
       <button class="btn btn-primary" data-action="status" data-id="${a.id}">${escapeHtml(t('action.status'))}</button>`;
 
@@ -1520,12 +1571,11 @@ async function showApp(user) {
   $('#userRole').className = `user-role badge badge-${user.role === 'admin' ? 'in_progress' : 'planned'}`;
   $$('.admin-only').forEach((el) => { el.hidden = user.role !== 'admin'; });
 
-  // Numatytieji filtrai
+  await refreshOptions();
+  // Numatytieji filtrai tik jau zinant sandelio laiko juosta.
   state.dashboard.filters = { date: isoDate() };
   state.history.filters = { dateFrom: daysAgo(7), dateTo: isoDate(), statusGroup: 'closed' };
   state.audit.filters = { dateFrom: daysAgo(7), dateTo: isoDate() };
-
-  await refreshOptions();
   if (user.role === 'admin') {
     try { state.users = (await api('/api/users')).users; } catch { /* nekritiška */ }
   }

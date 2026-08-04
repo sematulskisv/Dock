@@ -84,6 +84,29 @@ async function fetchOne(id, runner = db) {
   return rows[0] || null;
 }
 
+const DOCK_OCCUPYING_STATUSES = ['at_dock', 'in_progress'];
+
+async function checkDock(client, dockId, appointmentId = null, requireFree = false) {
+  if (!dockId) return { error: 'dock_required' };
+
+  const dock = await client.query(
+    'SELECT id FROM docks WHERE id = ? AND is_active = 1 FOR UPDATE',
+    [dockId]
+  );
+  if (!dock.rows[0]) return { error: 'dock_not_available' };
+  if (!requireFree) return null;
+
+  const occupied = await client.query(
+    `SELECT id FROM appointments
+      WHERE dock_id = ? AND status IN ('at_dock', 'in_progress') AND id <> ?
+      FOR UPDATE`,
+    [dockId, appointmentId || 0]
+  );
+  return occupied.rows[0]
+    ? { error: 'dock_occupied', appointmentId: occupied.rows[0].id }
+    : null;
+}
+
 // ---------------------------------------------------------------------
 // GET /api/appointments/options - reiksmes filtru sarasams
 // (turi buti pries /:id)
@@ -105,6 +128,7 @@ router.get('/options', async (req, res) => {
       operations: A.OPERATIONS,
       waitingAlertMinutes: A.waitingAlertMinutes(),
       lateGraceMinutes: A.lateGraceMinutes(),
+      timeZone: process.env.APP_TIMEZONE || 'Europe/Vilnius',
     });
   } catch (err) {
     console.error('[appointments] options klaida:', err);
@@ -157,6 +181,7 @@ router.get('/', async (req, res) => {
       offset,
       waitingAlertMinutes: A.waitingAlertMinutes(),
       lateGraceMinutes: A.lateGraceMinutes(),
+      timeZone: process.env.APP_TIMEZONE || 'Europe/Vilnius',
       serverTime: new Date().toISOString(),
     });
   } catch (err) {
@@ -171,35 +196,32 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const { whereSql, params } = A.buildFilters(req.query);
-    const wait = A.waitingAlertMinutes();
-    const grace = A.lateGraceMinutes();
-
     const sql = `
       SELECT
         COUNT(*) AS total,
-        COUNT(CASE WHEN a.operation = 'loading'   THEN 1 END) AS loading,
-        COUNT(CASE WHEN a.operation = 'unloading' THEN 1 END) AS unloading,
-        COUNT(CASE WHEN a.status IN ('planned','arrived','waiting','at_dock','in_progress') THEN 1 END) AS active,
-        COUNT(CASE WHEN a.status IN ('completed','departed') THEN 1 END) AS completed,
-        COUNT(CASE WHEN a.status = 'cancelled' THEN 1 END) AS cancelled,
-        COUNT(CASE WHEN a.status IN ('planned','arrived','waiting')
-                    AND UTC_TIMESTAMP() > a.planned_at + INTERVAL ${grace} MINUTE
-                   THEN 1 END) AS delayed,
-        COUNT(CASE WHEN a.status IN ('arrived','waiting')
+        COALESCE(SUM(CASE WHEN a.operation = 'loading' THEN 1 ELSE 0 END), 0) AS loading,
+        COALESCE(SUM(CASE WHEN a.operation = 'unloading' THEN 1 ELSE 0 END), 0) AS unloading,
+        COALESCE(SUM(CASE WHEN a.status IN ('planned','arrived','waiting','at_dock','in_progress') THEN 1 ELSE 0 END), 0) AS active,
+        COALESCE(SUM(CASE WHEN a.status IN ('completed','departed') THEN 1 ELSE 0 END), 0) AS completed,
+        COALESCE(SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled,
+        COALESCE(SUM(CASE WHEN a.status IN ('planned','arrived','waiting')
+                    AND UTC_TIMESTAMP() > TIMESTAMPADD(MINUTE, ?, a.planned_at)
+                   THEN 1 ELSE 0 END), 0) AS delayed,
+        COALESCE(SUM(CASE WHEN a.status IN ('arrived','waiting')
                     AND COALESCE(a.waiting_since, a.arrived_at) IS NOT NULL
-                    AND UTC_TIMESTAMP() > COALESCE(a.waiting_since, a.arrived_at) + INTERVAL ${wait} MINUTE
-                   THEN 1 END) AS waiting_long
+                    AND UTC_TIMESTAMP() > TIMESTAMPADD(MINUTE, ?, COALESCE(a.waiting_since, a.arrived_at))
+                   THEN 1 ELSE 0 END), 0) AS waiting_long
       FROM appointments a
       LEFT JOIN docks d ON d.id = a.dock_id
       ${whereSql}
     `;
 
-    const { rows } = await db.query(sql, params);
+    const { rows } = await db.query(sql, [A.lateGraceMinutes(), A.waitingAlertMinutes(), ...params]);
     const stats = {};
     for (const [k, v] of Object.entries(rows[0])) stats[k] = Number(v);
     res.json({ stats });
   } catch (err) {
-    console.error('[appointments] stats klaida:', err);
+    console.error('[appointments] stats klaida:', err.code || err.errno || '', err.message);
     res.status(500).json({ error: 'server_error' });
   }
 });
@@ -254,6 +276,10 @@ router.post('/', async (req, res) => {
 
   try {
     const created = await db.withTransaction(async (client) => {
+      if (data.dock_id) {
+        const dockProblem = await checkDock(client, data.dock_id);
+        if (dockProblem) return { conflict: dockProblem };
+      }
       const insert = await client.query(
         `INSERT INTO appointments
            (planned_at, operation, truck_plate, trailer_plate, driver_name, driver_phone,
@@ -288,10 +314,11 @@ router.post('/', async (req, res) => {
         ip: clientIp(req),
       }, client);
 
-      return fetchOne(newId, client);
+      return { appointment: await fetchOne(newId, client) };
     });
 
-    res.status(201).json({ appointment: created });
+    if (created.conflict) return res.status(409).json(created.conflict);
+    res.status(201).json(created);
   } catch (err) {
     console.error('[appointments] kurimo klaida:', err);
     res.status(500).json({ error: 'server_error' });
@@ -315,6 +342,22 @@ router.put('/:id', async (req, res) => {
     const updated = await db.withTransaction(async (client) => {
       const before = await client.query('SELECT * FROM appointments WHERE id = ? FOR UPDATE', [id]);
       if (!before.rows[0]) return null;
+
+      const nextDockId = Object.prototype.hasOwnProperty.call(data, 'dock_id')
+        ? data.dock_id
+        : before.rows[0].dock_id;
+      if (DOCK_OCCUPYING_STATUSES.includes(before.rows[0].status)) {
+        const dockProblem = await checkDock(
+          client,
+          nextDockId,
+          id,
+          true
+        );
+        if (dockProblem) return { conflict: dockProblem };
+      } else if (Object.prototype.hasOwnProperty.call(data, 'dock_id') && nextDockId) {
+        const dockProblem = await checkDock(client, nextDockId);
+        if (dockProblem) return { conflict: dockProblem };
+      }
 
       const sets = keys.map((k) => `${k} = ?`);
       const values = keys.map((k) => data[k]);
@@ -345,11 +388,12 @@ router.put('/:id', async (req, res) => {
         }, client);
       }
 
-      return fetchOne(id, client);
+      return { appointment: await fetchOne(id, client) };
     });
 
     if (!updated) return res.status(404).json({ error: 'not_found' });
-    res.json({ appointment: updated });
+    if (updated.conflict) return res.status(409).json(updated.conflict);
+    res.json(updated);
   } catch (err) {
     console.error('[appointments] atnaujinimo klaida:', err);
     res.status(500).json({ error: 'server_error' });
@@ -380,6 +424,11 @@ router.post('/:id/status', async (req, res) => {
       }
       if (!A.canTransition(appt.status, nextStatus, req.user.role)) {
         return { conflict: 'transition_not_allowed', from: appt.status };
+      }
+
+      if (DOCK_OCCUPYING_STATUSES.includes(nextStatus)) {
+        const dockProblem = await checkDock(client, appt.dock_id, id, true);
+        if (dockProblem) return { conflict: dockProblem.error, occupiedAppointmentId: dockProblem.appointmentId };
       }
 
       // Laiko zyma: 'waiting' visada perrasoma (kad laukimo skaitiklis butu tikslus),
@@ -429,35 +478,9 @@ router.post('/:id/status', async (req, res) => {
 // DELETE /api/appointments/:id - tik administratorius
 // ---------------------------------------------------------------------
 router.delete('/:id', requireAdmin, async (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_id' });
-
-  try {
-    const deleted = await db.withTransaction(async (client) => {
-      const found = await client.query('SELECT * FROM appointments WHERE id = ? FOR UPDATE', [id]);
-      const appt = found.rows[0];
-      if (!appt) return null;
-
-      await client.query('DELETE FROM appointments WHERE id = ?', [id]);
-
-      await db.writeAudit({
-        entity: 'appointment', entityId: id, action: 'delete',
-        details: {
-          truckPlate: appt.truck_plate,
-          plannedAt: appt.planned_at,
-          status: appt.status,
-        },
-        userId: req.user.id, ip: clientIp(req),
-      }, client);
-      return appt;
-    });
-
-    if (!deleted) return res.status(404).json({ error: 'not_found' });
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('[appointments] trynimo klaida:', err);
-    res.status(500).json({ error: 'server_error' });
-  }
+  // Fizinis trynimas panaikintu busenu istorija. Klaidinga registracija turi
+  // buti pazymeta busena "cancelled" ir likti audite.
+  return res.status(405).json({ error: 'use_cancelled_status' });
 });
 
 module.exports = router;
