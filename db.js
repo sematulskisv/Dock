@@ -156,6 +156,45 @@ async function initDb() {
   return true;
 }
 
+/**
+ * Pirmasis administratorius bendrame hostinge, kur nera SSH.
+ *
+ * Sukuriama TIK tada, kai users lentele visiskai tuscia, todel palikti siuos
+ * kintamuosius nepavojinga: antro administratoriaus jie nesukurs ir esamo
+ * slaptazodzio neperrasys. Tai kartu ir atsarginis kelias, jei kada liktum
+ * be nei vienos paskyros.
+ */
+async function ensureBootstrapAdmin() {
+  const email = env('BOOTSTRAP_ADMIN_EMAIL').toLowerCase();
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || '';
+  const fullName = env('BOOTSTRAP_ADMIN_NAME', 'Administratorius');
+
+  if (!email || !password) return null;
+
+  const { rows } = await query('SELECT COUNT(*) AS n FROM users');
+  if (Number(rows[0].n) > 0) return null;
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    console.error('[db] BOOTSTRAP_ADMIN_EMAIL netinkamas - administratorius nesukurtas');
+    return null;
+  }
+  if (password.length < 8) {
+    console.error('[db] BOOTSTRAP_ADMIN_PASSWORD per trumpas (min. 8) - administratorius nesukurtas');
+    return null;
+  }
+
+  const { hash, salt } = hashPassword(password);
+  await query(
+    `INSERT INTO users (email, full_name, role, password_hash, password_salt, created_at, updated_at)
+     VALUES (?, ?, 'admin', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [email, fullName, hash, salt]
+  );
+
+  console.log(`[db] sukurtas pradinis administratorius: ${email}`);
+  console.log('[db] SVARBU: pasalinkite BOOTSTRAP_ADMIN_* kintamuosius is aplinkos');
+  return email;
+}
+
 // ---------------------------------------------------------------------
 // Slaptazodziai (scrypt, be isoriniu priklausomybiu)
 // ---------------------------------------------------------------------
@@ -247,6 +286,7 @@ module.exports = {
   query,
   withTransaction,
   initDb,
+  ensureBootstrapAdmin,
   hashPassword,
   verifyPassword,
   hashToken,

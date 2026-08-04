@@ -81,6 +81,14 @@ async function tryInitDb() {
     dbState.lastError = null;
     dbState.lastCode = null;
     console.log('[server] duomenu baze paruosta');
+
+    // Pirmasis administratorius, kai nera SSH. Nesekmė cia nera priezastis
+    // neleisti programai veikti.
+    try {
+      await db.ensureBootstrapAdmin();
+    } catch (err) {
+      console.error('[server] pradinio administratoriaus sukurti nepavyko:', err.message);
+    }
     return true;
   } catch (err) {
     dbState.ready = false;
