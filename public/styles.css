@@ -282,6 +282,9 @@ h2 { font-size: 16px; }
 .customer-booking-status { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
 .customer-booking-vehicle { margin-top: 19px; font-size: 18px; }
 .customer-booking-route { margin-top: 7px; color: var(--text-2); font-size: 12.5px; font-weight: 600; }
+.customer-booking-carrier { display: flex; align-items: baseline; gap: 7px; margin-top: 11px; min-width: 0; }
+.customer-booking-carrier span { color: var(--text-3); font-size: 9.5px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.customer-booking-carrier strong { min-width: 0; overflow: hidden; color: var(--text); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .customer-booking-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 18px; padding-top: 13px; border-top: 1px solid #edf0f4; }
 .customer-booking-meta div { min-width: 0; display: grid; gap: 3px; }
 .customer-booking-meta span { color: var(--text-3); font-size: 9.5px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }

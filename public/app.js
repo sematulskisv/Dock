@@ -1065,6 +1065,10 @@ function customerBookingCardHtml(a) {
         ${a.trailer_plate ? `<span class="muted">/ ${escapeHtml(a.trailer_plate)}</span>` : ''}
       </div>
       <div class="customer-booking-route">${escapeHtml(route || '—')}</div>
+      <div class="customer-booking-carrier">
+        <span>${escapeHtml(t('form.carrier'))}</span>
+        <strong>${escapeHtml(a.carrier || '—')}</strong>
+      </div>
       <div class="customer-booking-meta">
         <div><span>${escapeHtml(t('col.reference'))}</span><strong>${escapeHtml(a.reference || '—')}</strong></div>
         <div><span>${escapeHtml(t('form.palletCount'))}</span><strong>${escapeHtml(`${a.pallet_count || 1} PLL · ${formatHandlingMinutes(a.handling_minutes)}`)}</strong></div>
