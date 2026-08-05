@@ -1160,6 +1160,38 @@ function queryString(filters) {
   return params.toString();
 }
 
+// Jei suvestines API laikinai neveikia, filtrų skaičių nepaliekame nuliniais.
+// Skaičiuojame iš to paties rezervacijų sąrašo, kurį naudotojas jau mato ekrane.
+function statsFromAppointments(appointments = []) {
+  const stats = {
+    total: 0, loading: 0, unloading: 0, active: 0,
+    planned: 0, arrived: 0, at_dock: 0, completed: 0, cancelled: 0,
+    delayed: 0, waiting_long: 0,
+  };
+  for (const appointment of appointments) {
+    stats.total += 1;
+    if (Object.prototype.hasOwnProperty.call(stats, appointment.status)) stats[appointment.status] += 1;
+    if (appointment.operation === 'loading') stats.loading += 1;
+    if (appointment.operation === 'unloading') stats.unloading += 1;
+    if (['planned', 'arrived', 'at_dock'].includes(appointment.status)) stats.active += 1;
+    if (Number(appointment.is_delayed)) stats.delayed += 1;
+    if (Number(appointment.is_waiting_long)) stats.waiting_long += 1;
+  }
+  return stats;
+}
+
+async function dashboardStatsFallback(filters, visibleRows, statusWasFiltered) {
+  if (!statusWasFiltered) return statsFromAppointments(visibleRows);
+  try {
+    const params = queryString({ ...filters, status: '' });
+    const result = await api(`/api/appointments?${params}&limit=500&sort=planned_at&dir=asc`);
+    return statsFromAppointments(result.appointments);
+  } catch {
+    // Bent jau aktyviai pasirinktos būsenos skaičius lieka teisingas.
+    return statsFromAppointments(visibleRows);
+  }
+}
+
 async function loadDashboard() {
   setLive('loading');
   try {
@@ -1175,17 +1207,22 @@ async function loadDashboard() {
     if (listResult.status === 'rejected') throw listResult.reason;
     const list = listResult.value;
     const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+    const invalidStats = !stats?.stats
+      || (list.appointments.length > 0 && Number(stats.stats.total) === 0);
+    const resolvedStats = invalidStats
+      ? await dashboardStatsFallback(statsFilters, list.appointments, Boolean(state.dashboard.filters.status))
+      : stats.stats;
     state.dashboard.rows = list.appointments;
-    state.dashboard.stats = stats ? stats.stats : null;
+    state.dashboard.stats = resolvedStats;
     state.options.waitingAlertMinutes = list.waitingAlertMinutes;
     state.options.lateGraceMinutes = list.lateGraceMinutes;
 
     if (state.user && state.user.role === 'customer') {
-      renderCustomerStats(stats ? stats.stats : null);
+      renderCustomerStats(resolvedStats);
       renderDashboardFilters();
-    } else renderStats('statsRow', stats ? stats.stats : null);
+    } else renderStats('statsRow', resolvedStats);
     renderAppointmentList('listDashboard', list.appointments);
-    setLive(stats ? '' : 'error');
+    setLive('');
   } catch (err) {
     setLive('error');
     if (err.code !== 'unauthorized') toast(errorMessage(err), 'error');
