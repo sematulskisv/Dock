@@ -143,6 +143,23 @@ async function initDb() {
     await pool.query(statement);
   }
 
+  // CREATE TABLE IF NOT EXISTS neprideda nauju stulpeliu jau veikianciai
+  // instaliacijai, todel sios priedines migracijos yra saugios atnaujinimams.
+  const appointmentColumns = [
+    ['pallet_count', 'TINYINT UNSIGNED NOT NULL DEFAULT 1'],
+    ['handling_minutes', 'SMALLINT UNSIGNED NOT NULL DEFAULT 30'],
+    ['origin_country', 'CHAR(2) NULL'],
+    ['destination_country', 'CHAR(2) NULL'],
+  ];
+  for (const [column, definition] of appointmentColumns) {
+    const exists = await query(
+      `SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'appointments' AND COLUMN_NAME = ?`,
+      [column]
+    );
+    if (!exists.rows[0]) await query(`ALTER TABLE appointments ADD COLUMN ${column} ${definition}`);
+  }
+
   const docks = await query('SELECT COUNT(*) AS n FROM docks');
   if (Number(docks.rows[0].n) === 0) {
     for (let i = 1; i <= 6; i += 1) {

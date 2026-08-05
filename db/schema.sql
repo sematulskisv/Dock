@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS appointments (
   carrier         VARCHAR(160) NULL,
   customer        VARCHAR(160) NULL,
   reference       VARCHAR(120) NULL,
+  pallet_count    TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  handling_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 30,
+  origin_country  CHAR(2)       NULL,
+  destination_country CHAR(2)   NULL,
   dock_id         INT UNSIGNED NULL,
   notes           TEXT         NULL,
 

@@ -39,6 +39,8 @@ Built to be used on a **warehouse tablet** as well as on a desk browser.
 | Driver self check-in | QR code opens a public form; matching truck and order numbers mark today's appointment as arrived |
 | Dashboard with today's truck appointments | "Šiandien" tab |
 | Full appointment record (arrival time, operation, plates, driver, carrier, customer, reference, dock, notes) | `appointments` table |
+| Pallet-based booking duration | 1–8 pallets: 30 min; 9–16: 60 min; 17–26: 90 min; 27–33: 120 min |
+| EU route | Required origin and destination country selectors for all 27 EU countries |
 | Eight statuses | Planned, Arrived, Waiting, At dock, Loading/unloading, Completed, Departed, Cancelled |
 | Automatic timestamps on every status change | `POST /api/appointments/:id/status` |
 | Filters: date, operation, status, dock, customer, carrier (+ free text search) | filter bar on every list view |
@@ -313,6 +315,22 @@ audit log like any other change.
   vehicle status, view audit logs, export CSV or access any other customer's booking.
 - Warehouse operators and administrators can add documents after unloading; the
   customer can download documents attached to their own booking.
+
+### Pallets, route and dock availability
+
+Each new appointment records a pallet count from 1 to 33 and a route between two EU
+countries. The handling duration is calculated server-side and saved with the visit:
+
+| Pallets | Reserved dock time |
+|---|---|
+| 1–8 | 30 min |
+| 9–16 | 60 min |
+| 17–26 | 90 min |
+| 27–33 | 120 min |
+
+The schedule marks every 30-minute block in that duration as occupied. Creation and
+editing use the same overlap check inside a database transaction, so an occupied dock
+interval cannot be double-booked.
 
 ### Driver arrival check-in
 

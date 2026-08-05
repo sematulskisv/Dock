@@ -115,6 +115,11 @@ const I18N = {
     'form.carrier': 'Vežėjas',
     'form.customer': 'Klientas',
     'form.reference': 'Užsakymo / siuntos nr.',
+    'form.palletCount': 'Palečių kiekis',
+    'form.duration': 'Planuojama krova',
+    'form.originCountry': 'Iš šalies',
+    'form.destinationCountry': 'Į šalį',
+    'form.chooseCountry': 'Pasirinkite šalį',
     'form.dock': 'Sandėlio vartai',
     'form.notes': 'Pastabos',
     'form.document': 'Prisegtas dokumentas',
@@ -310,6 +315,11 @@ const I18N = {
     'form.carrier': 'Carrier',
     'form.customer': 'Customer',
     'form.reference': 'Order / shipment ref.',
+    'form.palletCount': 'Pallet count',
+    'form.duration': 'Planned handling time',
+    'form.originCountry': 'From country',
+    'form.destinationCountry': 'To country',
+    'form.chooseCountry': 'Select country',
     'form.dock': 'Warehouse dock',
     'form.notes': 'Notes',
     'form.document': 'Attached document',
@@ -446,6 +456,17 @@ const PRIMARY_NEXT = {
 };
 
 const CLOSED = new Set(['completed', 'departed', 'cancelled']);
+const EU_COUNTRIES = [
+  ['AT', 'Austrija', 'Austria'], ['BE', 'Belgija', 'Belgium'], ['BG', 'Bulgarija', 'Bulgaria'],
+  ['HR', 'Kroatija', 'Croatia'], ['CY', 'Kipras', 'Cyprus'], ['CZ', 'Čekija', 'Czechia'],
+  ['DK', 'Danija', 'Denmark'], ['EE', 'Estija', 'Estonia'], ['FI', 'Suomija', 'Finland'],
+  ['FR', 'Prancūzija', 'France'], ['DE', 'Vokietija', 'Germany'], ['GR', 'Graikija', 'Greece'],
+  ['HU', 'Vengrija', 'Hungary'], ['IE', 'Airija', 'Ireland'], ['IT', 'Italija', 'Italy'],
+  ['LV', 'Latvija', 'Latvia'], ['LT', 'Lietuva', 'Lithuania'], ['LU', 'Liuksemburgas', 'Luxembourg'],
+  ['MT', 'Malta', 'Malta'], ['NL', 'Nyderlandai', 'Netherlands'], ['PL', 'Lenkija', 'Poland'],
+  ['PT', 'Portugalija', 'Portugal'], ['RO', 'Rumunija', 'Romania'], ['SK', 'Slovakija', 'Slovakia'],
+  ['SI', 'Slovėnija', 'Slovenia'], ['ES', 'Ispanija', 'Spain'], ['SE', 'Švedija', 'Sweden'],
+];
 
 /* ------------------------------------------------------------------ būsena */
 
@@ -482,6 +503,30 @@ function escapeHtml(value) {
 
 function localeTag() {
   return LANG === 'en' ? 'en-GB' : 'lt-LT';
+}
+
+function handlingMinutesForPallets(value) {
+  const pallets = Number(value);
+  if (!Number.isInteger(pallets) || pallets < 1 || pallets > 33) return null;
+  if (pallets <= 8) return 30;
+  if (pallets <= 16) return 60;
+  if (pallets <= 26) return 90;
+  return 120;
+}
+
+function formatHandlingMinutes(value) {
+  const minutes = Number(value) || 30;
+  return `${minutes} ${t('detail.minutes')}`;
+}
+
+function countryName(code) {
+  const country = EU_COUNTRIES.find(([value]) => value === code);
+  return country ? country[LANG === 'en' ? 2 : 1] : code || '—';
+}
+
+function routeLabel(appointment) {
+  if (!appointment.origin_country && !appointment.destination_country) return null;
+  return `${countryName(appointment.origin_country)} → ${countryName(appointment.destination_country)}`;
 }
 
 function warehouseTimeZone() {
@@ -893,7 +938,10 @@ function apptRowHtml(a) {
       </td>
       <td>${escapeHtml(a.carrier || '—')}</td>
       <td>${escapeHtml(a.customer || '—')}</td>
-      <td>${escapeHtml(a.reference || '—')}</td>
+      <td>
+        <div>${escapeHtml(a.reference || '—')}</div>
+        <div class="cell-sub">${escapeHtml(`${a.pallet_count || 1} PLL · ${formatHandlingMinutes(a.handling_minutes)}`)}${routeLabel(a) ? ` · ${escapeHtml(routeLabel(a))}` : ''}</div>
+      </td>
       <td>${dock}</td>
       <td>
         <div class="card-badges">
@@ -923,6 +971,10 @@ function apptCardHtml(a) {
     [t('filter.carrier'), a.carrier],
     [t('filter.customer'), a.customer],
     [t('col.reference'), a.reference],
+    [t('form.palletCount'), a.pallet_count ? `${a.pallet_count} PLL` : null],
+    [t('form.duration'), formatHandlingMinutes(a.handling_minutes)],
+    [t('form.originCountry'), countryName(a.origin_country)],
+    [t('form.destinationCountry'), countryName(a.destination_country)],
     [t('col.dock'), a.dock_code],
   ];
 
@@ -1129,12 +1181,18 @@ function scheduleCellHtml(bookings, dock, slot) {
   if (first.anonymous) {
     return `<td class="schedule-cell is-busy"><span class="schedule-slot schedule-unavailable">${escapeHtml(t('schedule.busy'))}</span></td>`;
   }
-  const label = bookings.map((a) => a.truck_plate).join(' · ');
+  const startsHere = bookings.filter((a) => a.scheduleStartsHere);
+  if (!startsHere.length) {
+    return `<td class="schedule-cell is-busy"><span class="schedule-slot schedule-continuation">${escapeHtml(t('schedule.busy'))}</span></td>`;
+  }
+  const label = startsHere.map((a) => a.truck_plate).join(' · ');
+  const duration = formatHandlingMinutes(startsHere[0].handling_minutes);
   return `<td class="schedule-cell is-busy">
-    <button type="button" class="schedule-slot" data-action="detail" data-id="${first.id}"
-      title="${escapeHtml(label)}">
-      <span class="schedule-plate">${escapeHtml(first.truck_plate)}</span>
-      ${bookings.length > 1 ? `<span class="schedule-extra">+${bookings.length - 1}</span>` : ''}
+    <button type="button" class="schedule-slot" data-action="detail" data-id="${startsHere[0].id}"
+      title="${escapeHtml(`${label} · ${duration}`)}">
+      <span class="schedule-plate">${escapeHtml(startsHere[0].truck_plate)}</span>
+      <span class="schedule-extra">${escapeHtml(duration)}</span>
+      ${startsHere.length > 1 ? `<span class="schedule-extra">+${startsHere.length - 1}</span>` : ''}
     </button>
   </td>`;
 }
@@ -1156,11 +1214,14 @@ function renderSchedule() {
     if (!local || !local.startsWith(state.schedule.date)) continue;
     const minutes = Number(local.slice(11, 13)) * 60 + Number(local.slice(14, 16));
     const slotMinute = Math.floor(minutes / SCHEDULE_SLOT_MINUTES) * SCHEDULE_SLOT_MINUTES;
-    if (slotMinute < SCHEDULE_START_MINUTE || slotMinute >= SCHEDULE_END_MINUTE) continue;
-    const slot = `${String(Math.floor(slotMinute / 60)).padStart(2, '0')}:${String(slotMinute % 60).padStart(2, '0')}`;
-    const key = `${appointment.dock_id}|${slot}`;
-    if (!bookings.has(key)) bookings.set(key, []);
-    bookings.get(key).push(appointment);
+    const duration = Math.max(SCHEDULE_SLOT_MINUTES, Number(appointment.handling_minutes) || SCHEDULE_SLOT_MINUTES);
+    for (let occupiedMinute = slotMinute; occupiedMinute < slotMinute + duration; occupiedMinute += SCHEDULE_SLOT_MINUTES) {
+      if (occupiedMinute < SCHEDULE_START_MINUTE || occupiedMinute >= SCHEDULE_END_MINUTE) continue;
+      const slot = `${String(Math.floor(occupiedMinute / 60)).padStart(2, '0')}:${String(occupiedMinute % 60).padStart(2, '0')}`;
+      const key = `${appointment.dock_id}|${slot}`;
+      if (!bookings.has(key)) bookings.set(key, []);
+      bookings.get(key).push({ ...appointment, scheduleStartsHere: occupiedMinute === slotMinute });
+    }
   }
 
   const unassigned = customerMode ? 0 : rows.filter((a) => !a.dock_id).length;
@@ -1377,7 +1438,7 @@ function closeModal(id) {
   if (!$$('.modal:not([hidden])').length) document.body.style.overflow = '';
 }
 
-function fillFormSelects(selectedDockId) {
+function fillFormSelects(selectedDockId, selectedOrigin = '', selectedDestination = '') {
   const dockSel = $('#fDock');
   dockSel.innerHTML = [`<option value="">${escapeHtml(t('common.none'))}</option>`]
     .concat(state.options.docks
@@ -1387,6 +1448,17 @@ function fillFormSelects(selectedDockId) {
 
   $('#carrierOptions').innerHTML = state.options.carriers.map((c) => `<option value="${escapeHtml(c)}"></option>`).join('');
   $('#customerOptions').innerHTML = state.options.customers.map((c) => `<option value="${escapeHtml(c)}"></option>`).join('');
+
+  const countryOptions = (selected) => [`<option value="">${escapeHtml(t('form.chooseCountry'))}</option>`]
+    .concat(EU_COUNTRIES.map(([code, lt, en]) => `<option value="${code}"${code === selected ? ' selected' : ''}>${escapeHtml(LANG === 'en' ? en : lt)}</option>`))
+    .join('');
+  $('#fOriginCountry').innerHTML = countryOptions(selectedOrigin);
+  $('#fDestinationCountry').innerHTML = countryOptions(selectedDestination);
+}
+
+function updatePalletDurationHint() {
+  const minutes = handlingMinutesForPallets($('#fPalletCount').value);
+  $('#palletDurationHint').textContent = minutes ? `${t('form.duration')}: ${formatHandlingMinutes(minutes)}` : '';
 }
 
 function openApptForm(appt, defaults = {}) {
@@ -1411,9 +1483,15 @@ function openApptForm(appt, defaults = {}) {
   $('#fCarrier').value = appt ? (appt.carrier || '') : '';
   $('#fCustomer').value = appt ? (appt.customer || '') : '';
   $('#fReference').value = appt ? (appt.reference || '') : '';
+  $('#fPalletCount').value = appt ? (appt.pallet_count || 1) : 1;
   $('#fNotes').value = appt ? (appt.notes || '') : '';
 
-  fillFormSelects(appt ? appt.dock_id : (defaults.dockId || ''));
+  fillFormSelects(
+    appt ? appt.dock_id : (defaults.dockId || ''),
+    appt ? appt.origin_country : '',
+    appt ? appt.destination_country : ''
+  );
+  updatePalletDurationHint();
   openModal('apptModal');
   setTimeout(() => $('#fTruckPlate').focus(), 60);
 }
@@ -1430,12 +1508,15 @@ async function saveAppointment() {
     carrier: $('#fCarrier').value.trim(),
     customer: $('#fCustomer').value.trim(),
     reference: $('#fReference').value.trim(),
+    palletCount: $('#fPalletCount').value,
+    originCountry: $('#fOriginCountry').value,
+    destinationCountry: $('#fDestinationCountry').value,
     dockId: $('#fDock').value || null,
     notes: $('#fNotes').value.trim(),
   };
 
   const errBox = $('#apptFormError');
-  if (!body.plannedAt || !body.truckPlate) {
+  if (!body.plannedAt || !body.truckPlate || !handlingMinutesForPallets(body.palletCount) || !body.originCountry || !body.destinationCountry) {
     errBox.textContent = t('form.required');
     errBox.hidden = false;
     return;
@@ -1527,6 +1608,10 @@ async function openDetail(id) {
       [t('form.carrier'), a.carrier],
       [t('form.customer'), a.customer],
       [t('form.reference'), a.reference],
+      [t('form.palletCount'), a.pallet_count ? `${a.pallet_count} PLL` : null],
+      [t('form.duration'), formatHandlingMinutes(a.handling_minutes)],
+      [t('form.originCountry'), a.origin_country ? countryName(a.origin_country) : null],
+      [t('form.destinationCountry'), a.destination_country ? countryName(a.destination_country) : null],
       [t('form.dock'), a.dock_code ? (a.dock_name ? `${a.dock_code} · ${a.dock_name}` : a.dock_code) : null],
       [t('detail.workTime'), a.work_minutes != null ? `${a.work_minutes} ${t('detail.minutes')}` : null],
       [t('detail.onsiteTime'), a.onsite_minutes != null ? `${a.onsite_minutes} ${t('detail.minutes')}` : null],
@@ -1982,6 +2067,8 @@ async function handleAction(action, el) {
 }
 
 function bindEvents() {
+  $('#fPalletCount').addEventListener('input', updatePalletDurationHint);
+
   // Prisijungimas
   $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();

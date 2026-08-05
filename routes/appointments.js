@@ -20,6 +20,17 @@ const ACCEPTED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel',
 ]);
+const EU_COUNTRY_CODES = new Set([
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU',
+  'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE',
+]);
+
+function handlingMinutesForPallets(count) {
+  if (count <= 8) return 30;
+  if (count <= 16) return 60;
+  if (count <= 26) return 90;
+  return 120;
+}
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -118,6 +129,24 @@ function validateBody(body, { partial = false } = {}) {
   if (body.reference !== undefined) data.reference = str(body.reference, 120);
   if (body.notes !== undefined) data.notes = str(body.notes, 2000);
 
+  if (!partial || body.palletCount !== undefined) {
+    const pallets = Number(body.palletCount);
+    if (!Number.isInteger(pallets) || pallets < 1 || pallets > 33) errors.push('palletCount');
+    else {
+      data.pallet_count = pallets;
+      data.handling_minutes = handlingMinutesForPallets(pallets);
+    }
+  }
+
+  for (const [bodyKey, column] of [['originCountry', 'origin_country'], ['destinationCountry', 'destination_country']]) {
+    if (!partial || body[bodyKey] !== undefined) {
+      const country = str(body[bodyKey], 2)?.toUpperCase() || null;
+      if (!partial && (!country || !EU_COUNTRY_CODES.has(country))) errors.push(bodyKey);
+      else if (country && !EU_COUNTRY_CODES.has(country)) errors.push(bodyKey);
+      else data[column] = country;
+    }
+  }
+
   if (body.dockId !== undefined) {
     if (body.dockId === null || body.dockId === '' || body.dockId === 'none') {
       data.dock_id = null;
@@ -166,16 +195,16 @@ async function checkDock(client, dockId, appointmentId = null, requireFree = fal
     : null;
 }
 
-async function checkReservationSlot(client, dockId, plannedAt, appointmentId = null) {
+async function checkReservationSlot(client, dockId, plannedAt, handlingMinutes, appointmentId = null) {
   if (!dockId || !plannedAt) return null;
   const start = new Date(plannedAt);
-  const startWindow = new Date(start.getTime() - 30 * 60 * 1000);
-  const endWindow = new Date(start.getTime() + 30 * 60 * 1000);
+  const endWindow = new Date(start.getTime() + (Number(handlingMinutes) || 30) * 60 * 1000);
   const occupied = await client.query(
     `SELECT id FROM appointments
-      WHERE dock_id = ? AND status <> 'cancelled' AND planned_at > ? AND planned_at < ? AND id <> ?
+      WHERE dock_id = ? AND status <> 'cancelled' AND planned_at < ?
+        AND DATE_ADD(planned_at, INTERVAL handling_minutes MINUTE) > ? AND id <> ?
       FOR UPDATE`,
-    [dockId, startWindow, endWindow, appointmentId || 0]
+    [dockId, endWindow, start, appointmentId || 0]
   );
   return occupied.rows[0] ? { error: 'reservation_occupied', appointmentId: occupied.rows[0].id } : null;
 }
@@ -229,7 +258,7 @@ router.get('/availability', async (req, res) => {
   if (!whereSql) return res.status(400).json({ error: 'invalid_date' });
   try {
     const { rows } = await db.query(
-      `SELECT a.dock_id, a.planned_at
+      `SELECT a.dock_id, a.planned_at, a.handling_minutes
          FROM appointments a
         ${whereSql} AND a.status <> 'cancelled' AND a.dock_id IS NOT NULL
         ORDER BY a.planned_at ASC`,
@@ -403,19 +432,20 @@ router.post('/booking', uploadSingle, async (req, res) => {
     const created = await db.withTransaction(async (client) => {
       const dockProblem = await checkDock(client, data.dock_id);
       if (dockProblem) return { conflict: dockProblem };
-      const reservationProblem = await checkReservationSlot(client, data.dock_id, data.planned_at);
+      const reservationProblem = await checkReservationSlot(client, data.dock_id, data.planned_at, data.handling_minutes);
       if (reservationProblem) return { conflict: reservationProblem };
 
       const insert = await client.query(
         `INSERT INTO appointments
            (planned_at, operation, truck_plate, trailer_plate, driver_name, driver_phone,
-            carrier, customer, reference, dock_id, notes, status,
+           carrier, customer, reference, pallet_count, handling_minutes, origin_country, destination_country, dock_id, notes, status,
             created_by, updated_by, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,'planned',?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'planned',?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())`,
         [
           data.planned_at, data.operation, data.truck_plate, data.trailer_plate ?? null,
           data.driver_name ?? null, data.driver_phone ?? null, data.carrier ?? null,
-          data.customer ?? null, data.reference ?? null, data.dock_id,
+          data.customer ?? null, data.reference ?? null, data.pallet_count, data.handling_minutes,
+          data.origin_country, data.destination_country, data.dock_id,
           data.notes ?? null, req.user.id, req.user.id,
         ]
       );
@@ -456,17 +486,20 @@ router.post('/', async (req, res) => {
       if (data.dock_id) {
         const dockProblem = await checkDock(client, data.dock_id);
         if (dockProblem) return { conflict: dockProblem };
+        const reservationProblem = await checkReservationSlot(client, data.dock_id, data.planned_at, data.handling_minutes);
+        if (reservationProblem) return { conflict: reservationProblem };
       }
       const insert = await client.query(
         `INSERT INTO appointments
            (planned_at, operation, truck_plate, trailer_plate, driver_name, driver_phone,
-            carrier, customer, reference, dock_id, notes, status,
+            carrier, customer, reference, pallet_count, handling_minutes, origin_country, destination_country, dock_id, notes, status,
             created_by, updated_by, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,'planned',?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())`,
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'planned',?,?,UTC_TIMESTAMP(),UTC_TIMESTAMP())`,
         [
           data.planned_at, data.operation, data.truck_plate, data.trailer_plate ?? null,
           data.driver_name ?? null, data.driver_phone ?? null, data.carrier ?? null,
-          data.customer ?? null, data.reference ?? null, data.dock_id ?? null,
+          data.customer ?? null, data.reference ?? null, data.pallet_count, data.handling_minutes,
+          data.origin_country, data.destination_country, data.dock_id ?? null,
           data.notes ?? null, req.user.id, req.user.id,
         ]
       );
@@ -541,9 +574,13 @@ router.put('/:id', async (req, res) => {
         const dockProblem = await checkDock(client, nextDockId);
         if (dockProblem) return { conflict: dockProblem };
       }
-      if (isCustomer(req)) {
+      const reservationFieldsChanged = ['dock_id', 'planned_at', 'handling_minutes'].some((key) =>
+        Object.prototype.hasOwnProperty.call(data, key)
+      );
+      if (reservationFieldsChanged) {
         const nextPlannedAt = data.planned_at || before.rows[0].planned_at;
-        const reservationProblem = await checkReservationSlot(client, nextDockId, nextPlannedAt, id);
+        const nextHandlingMinutes = data.handling_minutes || before.rows[0].handling_minutes;
+        const reservationProblem = await checkReservationSlot(client, nextDockId, nextPlannedAt, nextHandlingMinutes, id);
         if (reservationProblem) return { conflict: reservationProblem };
       }
 

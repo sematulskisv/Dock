@@ -254,6 +254,22 @@
       </label>
 
       <label class="field">
+        <span data-i18n="form.palletCount">Palečių kiekis</span>
+        <input type="number" id="fPalletCount" min="1" max="33" step="1" required inputmode="numeric" />
+        <small class="hint" id="palletDurationHint"></small>
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.originCountry">Iš šalies</span>
+        <select id="fOriginCountry" required></select>
+      </label>
+
+      <label class="field">
+        <span data-i18n="form.destinationCountry">Į šalį</span>
+        <select id="fDestinationCountry" required></select>
+      </label>
+
+      <label class="field">
         <span data-i18n="form.dock">Sandėlio vartai</span>
         <select id="fDock"></select>
       </label>
@@ -393,6 +409,6 @@
 
 <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-<script src="/app.js?v=4"></script>
+<script src="/app.js?v=5"></script>
 </body>
 </html>

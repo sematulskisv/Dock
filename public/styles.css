@@ -513,6 +513,7 @@ select {
 .schedule-cell.is-busy .schedule-slot:hover,
 .schedule-cell.is-busy .schedule-slot:focus-visible { background: #ffd7bf; outline: 0; }
 .schedule-slot.schedule-unavailable { cursor: not-allowed; pointer-events: none; }
+.schedule-slot.schedule-continuation { cursor: default; pointer-events: none; color: transparent; }
 .schedule-plate { font-family: var(--font-mono); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .schedule-extra { flex: 0 0 auto; font-size: 10px; font-weight: 700; }
 .schedule-unassigned { margin: 0 0 8px; color: var(--warn); font-size: 12px; font-weight: 650; }
