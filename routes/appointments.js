@@ -332,6 +332,11 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const { whereSql, params } = scopedFilters(req, req.query);
+    // Reiksmes gaunamos is validuotu aplinkos kintamuju (sveiki skaiciai),
+    // todel jas saugu iterpti. Taip apeiname kai kuriu MariaDB hostingu
+    // prepared-statement klaida su ? TIMESTAMPADD intervalo argumente.
+    const grace = A.lateGraceMinutes();
+    const wait = A.waitingAlertMinutes();
     const sql = `
       SELECT
         COUNT(*) AS total,
@@ -341,18 +346,18 @@ router.get('/stats', async (req, res) => {
         COALESCE(SUM(CASE WHEN a.status IN ('completed','departed') THEN 1 ELSE 0 END), 0) AS completed,
         COALESCE(SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled,
         COALESCE(SUM(CASE WHEN a.status IN ('planned','arrived','waiting')
-                    AND UTC_TIMESTAMP() > TIMESTAMPADD(MINUTE, ?, a.planned_at)
+                    AND UTC_TIMESTAMP() > a.planned_at + INTERVAL ${grace} MINUTE
                    THEN 1 ELSE 0 END), 0) AS delayed,
         COALESCE(SUM(CASE WHEN a.status IN ('arrived','waiting')
                     AND COALESCE(a.waiting_since, a.arrived_at) IS NOT NULL
-                    AND UTC_TIMESTAMP() > TIMESTAMPADD(MINUTE, ?, COALESCE(a.waiting_since, a.arrived_at))
+                    AND UTC_TIMESTAMP() > COALESCE(a.waiting_since, a.arrived_at) + INTERVAL ${wait} MINUTE
                    THEN 1 ELSE 0 END), 0) AS waiting_long
       FROM appointments a
       LEFT JOIN docks d ON d.id = a.dock_id
       ${whereSql}
     `;
 
-    const { rows } = await db.query(sql, [A.lateGraceMinutes(), A.waitingAlertMinutes(), ...params]);
+    const { rows } = await db.query(sql, params);
     const stats = {};
     for (const [k, v] of Object.entries(rows[0])) stats[k] = Number(v);
     res.json({ stats });
@@ -652,6 +657,47 @@ router.post('/:id/documents', uploadSingle, async (req, res) => {
   } catch (err) {
     removeUploadedFile(req.file);
     console.error('[appointments] dokumento ikelimo klaida:', err.message);
+    return res.status(500).json({ error: 'server_error' });
+  }
+});
+
+// POST /api/appointments/:id/cancel - vadybininkas gali atsaukti savo dar nepradeta vizita.
+router.post('/:id/cancel', async (req, res) => {
+  if (!isCustomer(req)) return res.status(403).json({ error: 'manager_only' });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'bad_id' });
+
+  try {
+    const result = await db.withTransaction(async (client) => {
+      const current = await client.query('SELECT * FROM appointments WHERE id = ? FOR UPDATE', [id]);
+      const appointment = current.rows[0];
+      if (!appointment || Number(appointment.created_by) !== Number(req.user.id)) return { notFound: true };
+      if (!['planned', 'arrived', 'waiting'].includes(appointment.status)) return { conflict: true };
+
+      await client.query(
+        `UPDATE appointments
+            SET status = 'cancelled', cancelled_at = COALESCE(cancelled_at, UTC_TIMESTAMP()),
+                updated_by = ?, updated_at = UTC_TIMESTAMP()
+          WHERE id = ?`,
+        [req.user.id, id]
+      );
+      await client.query(
+        `INSERT INTO status_events (appointment_id, from_status, to_status, note, changed_by, changed_at)
+         VALUES (?, ?, 'cancelled', 'Vadybininkas atšaukė rezervaciją', ?, UTC_TIMESTAMP())`,
+        [id, appointment.status, req.user.id]
+      );
+      await db.writeAudit({
+        entity: 'appointment', entityId: id, action: 'status',
+        details: { from: appointment.status, to: 'cancelled', managerCancellation: true, truckPlate: appointment.truck_plate },
+        userId: req.user.id, ip: clientIp(req),
+      }, client);
+      return { appointment: await fetchOne(id, client) };
+    });
+    if (result.notFound) return res.status(404).json({ error: 'not_found' });
+    if (result.conflict) return res.status(409).json({ error: 'cancellation_not_allowed' });
+    return res.json(result);
+  } catch (err) {
+    console.error('[appointments] rezervacijos atsaukimo klaida:', err.message);
     return res.status(500).json({ error: 'server_error' });
   }
 });

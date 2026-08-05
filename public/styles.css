@@ -289,6 +289,8 @@ h2 { font-size: 16px; }
 .customer-booking-meta div { min-width: 0; display: grid; gap: 3px; }
 .customer-booking-meta span { color: var(--text-3); font-size: 9.5px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
 .customer-booking-meta strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.customer-booking-cancel { width: fit-content; margin-top: 12px; padding: 0; border: 0; background: transparent; color: var(--danger); font: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; }
+.customer-booking-cancel:hover { text-decoration: underline; }
 .customer-booking-detail { display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: auto; padding: 12px 0 0; border: 0; border-top: 1px solid #edf0f4; background: transparent; color: var(--accent-2); font: inherit; font-size: 12.5px; font-weight: 750; cursor: pointer; }
 .customer-booking-detail span { font-size: 17px; transition: transform .14s ease; }
 .customer-booking-detail:hover span { transform: translateX(3px); }

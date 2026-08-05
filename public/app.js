@@ -35,7 +35,7 @@ const I18N = {
 
     'role.admin': 'Administratorius',
     'role.operator': 'Sandėlio operatorius',
-    'role.customer': 'Klientas',
+    'role.customer': 'Vadybininkas',
 
     'op.loading': 'Pakrovimas',
     'op.unloading': 'Iškrovimas',
@@ -100,6 +100,7 @@ const I18N = {
     'action.new': 'Naujas vizitas',
     'action.save': 'Išsaugoti',
     'action.cancel': 'Atšaukti',
+    'action.cancelBooking': 'Atšaukti rezervaciją',
     'action.edit': 'Redaguoti',
     'action.delete': 'Ištrinti',
     'action.details': 'Detalės',
@@ -138,6 +139,8 @@ const I18N = {
     'form.saved': 'Išsaugota',
     'form.deleted': 'Ištrinta',
     'form.confirmDelete': 'Tikrai ištrinti šį vizitą? Veiksmo atšaukti negalima.',
+    'form.confirmCancel': 'Ar tikrai norite atšaukti šią rezervaciją?',
+    'form.cancelled': 'Rezervacija atšaukta',
 
     'detail.timeline': 'Būsenų istorija',
     'detail.info': 'Informacija',
@@ -242,7 +245,7 @@ const I18N = {
 
     'role.admin': 'Administrator',
     'role.operator': 'Warehouse operator',
-    'role.customer': 'Customer',
+    'role.customer': 'Manager',
 
     'op.loading': 'Loading',
     'op.unloading': 'Unloading',
@@ -307,6 +310,7 @@ const I18N = {
     'action.new': 'New appointment',
     'action.save': 'Save',
     'action.cancel': 'Cancel',
+    'action.cancelBooking': 'Cancel booking',
     'action.edit': 'Edit',
     'action.delete': 'Delete',
     'action.details': 'Details',
@@ -345,6 +349,8 @@ const I18N = {
     'form.saved': 'Saved',
     'form.deleted': 'Deleted',
     'form.confirmDelete': 'Delete this appointment? This cannot be undone.',
+    'form.confirmCancel': 'Cancel this booking?',
+    'form.cancelled': 'Booking cancelled',
 
     'detail.timeline': 'Status history',
     'detail.info': 'Details',
@@ -732,6 +738,7 @@ function errorMessage(err) {
     case 'file_too_large': return LANG === 'en' ? 'The document is too large.' : 'Dokumento failas per didelis.';
     case 'invalid_document': return LANG === 'en' ? 'Only PDF, JPG, PNG or Excel files are allowed.' : 'Leidžiami tik PDF, JPG, PNG arba Excel failai.';
     case 'reservation_occupied': return LANG === 'en' ? 'This time is already booked.' : 'Šis laikas jau užimtas.';
+    case 'cancellation_not_allowed': return LANG === 'en' ? 'This booking can no longer be cancelled.' : 'Šios rezervacijos jau nebegalima atšaukti.';
     case 'validation_failed': return t('form.required');
     case 'rate_limited': return t('login.rateLimited');
     default: return t('error.generic');
@@ -1058,6 +1065,11 @@ function apptCardHtml(a) {
   `;
 }
 
+function canManagerCancel(appointment) {
+  return state.user && state.user.role === 'customer'
+    && ['planned', 'arrived', 'waiting'].includes(appointment.status);
+}
+
 function customerBookingCardHtml(a) {
   const alerts = computeAlerts(a);
   const route = routeLabel(a);
@@ -1084,6 +1096,7 @@ function customerBookingCardHtml(a) {
         <div><span>${escapeHtml(t('form.palletCount'))}</span><strong>${escapeHtml(`${a.pallet_count || 1} PLL · ${formatHandlingMinutes(a.handling_minutes)}`)}</strong></div>
         <div><span>${escapeHtml(t('col.dock'))}</span><strong>${escapeHtml(a.dock_code || '—')}</strong></div>
       </div>
+      ${canManagerCancel(a) ? `<button class="customer-booking-cancel" data-action="cancel-booking" data-id="${a.id}">${escapeHtml(t('action.cancelBooking'))}</button>` : ''}
       <button class="customer-booking-detail" data-action="detail" data-id="${a.id}">
         ${escapeHtml(t('customer.viewDetails'))}<span aria-hidden="true">→</span>
       </button>
@@ -1763,6 +1776,7 @@ async function openDetail(id) {
     $('#detailFoot').innerHTML = `
       ${state.user.role !== 'customer' ? `<label class="btn btn-ghost">${escapeHtml(t('form.uploadDocument'))}<input class="detail-document-input" data-id="${a.id}" type="file" hidden accept="application/pdf,image/jpeg,image/png,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" /></label>` : ''}
       ${state.user.role !== 'customer' || a.status === 'planned' ? `<button class="btn" data-action="edit-appt" data-id="${a.id}">${escapeHtml(t('action.edit'))}</button>` : ''}
+      ${canManagerCancel(a) ? `<button class="btn btn-danger" data-action="cancel-booking" data-id="${a.id}">${escapeHtml(t('action.cancelBooking'))}</button>` : ''}
       ${state.user.role !== 'customer' ? `<button class="btn btn-primary" data-action="status" data-id="${a.id}">${escapeHtml(t('action.status'))}</button>` : ''}`;
 
     state.detailAppt = a;
@@ -2073,6 +2087,20 @@ async function handleAction(action, el) {
     case 'detail':
       closeModal('statusModal');
       openDetail(id);
+      break;
+
+    case 'cancel-booking':
+      if (!confirm(t('form.confirmCancel'))) break;
+      el.disabled = true;
+      try {
+        await api(`/api/appointments/${id}/cancel`, { method: 'POST' });
+        closeModal('detailModal');
+        toast(t('form.cancelled'), 'ok');
+        await refreshCurrentView();
+      } catch (err) {
+        toast(errorMessage(err), 'error');
+        el.disabled = false;
+      }
       break;
 
     case 'schedule-create':
