@@ -150,6 +150,22 @@
     <!-- ---------- NUSTATYMAI (admin) ---------- -->
     <section class="view" id="view-admin">
       <div class="admin-grid">
+        <div class="panel driver-checkin-panel">
+          <div class="panel-head">
+            <h2 data-i18n="checkin.title">Vairuotojų atvykimas</h2>
+          </div>
+          <div class="driver-checkin-body">
+            <img id="driverCheckinQr" class="driver-checkin-qr" alt="Vairuotojo atvykimo QR kodas" />
+            <div>
+              <p data-i18n="checkin.text">Parodykite arba atsispausdinkite šį QR kodą prie įvažiavimo.</p>
+              <a id="driverCheckinLink" class="driver-checkin-link" target="_blank" rel="noopener"></a>
+              <div class="driver-checkin-actions">
+                <a class="btn btn-primary" href="/driver-checkin" target="_blank" rel="noopener" data-i18n="checkin.open">Atidaryti vairuotojo puslapį</a>
+                <button class="btn btn-ghost" data-action="print-driver-checkin-qr" data-i18n="checkin.print">Atidaryti QR spausdinimui</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="panel">
           <div class="panel-head">
             <h2 data-i18n="admin.users">Naudotojai</h2>
@@ -377,6 +393,6 @@
 
 <div class="toast-host" id="toastHost" aria-live="polite"></div>
 
-<script src="/app.js?v=3"></script>
+<script src="/app.js?v=4"></script>
 </body>
 </html>

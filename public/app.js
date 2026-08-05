@@ -22,6 +22,11 @@ const I18N = {
     'nav.audit': 'Auditas',
     'nav.admin': 'Nustatymai',
 
+    'checkin.title': 'Vairuotojų atvykimas',
+    'checkin.text': 'Parodykite arba atsispausdinkite šį QR kodą prie įvažiavimo. Vairuotojas suveda vilkiko ir užsakymo numerius, o vizitas iškart pažymimas „Atvyko“.',
+    'checkin.open': 'Atidaryti vairuotojo puslapį',
+    'checkin.print': 'Atidaryti QR spausdinimui',
+
     'role.admin': 'Administratorius',
     'role.operator': 'Sandėlio operatorius',
     'role.customer': 'Klientas',
@@ -211,6 +216,11 @@ const I18N = {
     'nav.history': 'History',
     'nav.audit': 'Audit',
     'nav.admin': 'Settings',
+
+    'checkin.title': 'Driver arrivals',
+    'checkin.text': 'Display or print this QR code at the entrance. The driver enters the truck and order numbers, and the appointment is immediately marked as arrived.',
+    'checkin.open': 'Open driver page',
+    'checkin.print': 'Open QR for printing',
 
     'role.admin': 'Administrator',
     'role.operator': 'Warehouse operator',
@@ -1640,6 +1650,11 @@ async function loadAdmin() {
           <button class="btn btn-danger btn-sm" data-action="delete-dock" data-id="${d.id}">×</button>
         </div>
       </div>`).join('');
+
+    const driverCheckinLink = `${window.location.origin}/driver-checkin`;
+    $('#driverCheckinLink').href = driverCheckinLink;
+    $('#driverCheckinLink').textContent = driverCheckinLink;
+    $('#driverCheckinQr').src = `/api/driver-checkin/qr.svg?v=${Date.now()}`;
   } catch (err) {
     toast(errorMessage(err), 'error');
   }
@@ -1875,6 +1890,10 @@ async function handleAction(action, el) {
     case 'schedule-day':
       state.schedule.date = shiftIsoDate(state.schedule.date, Number(el.dataset.direction) || 0);
       loadSchedule();
+      break;
+
+    case 'print-driver-checkin-qr':
+      window.open('/api/driver-checkin/qr.svg', '_blank', 'noopener');
       break;
 
     case 'edit-appt': {

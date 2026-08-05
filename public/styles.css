@@ -748,6 +748,13 @@ tr.row-done td { color: var(--text-2); }
 }
 .panel-body { padding: 6px 0; }
 
+.driver-checkin-panel { grid-column: 1 / -1; }
+.driver-checkin-body { display: flex; align-items: center; gap: 20px; padding: 16px; }
+.driver-checkin-qr { width: 150px; height: 150px; flex: 0 0 auto; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: #fff; }
+.driver-checkin-body p { max-width: 610px; margin: 0 0 9px; color: var(--text-2); font-size: 13px; line-height: 1.45; }
+.driver-checkin-link { display: block; width: fit-content; max-width: 100%; margin-bottom: 12px; color: var(--accent-2); font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.driver-checkin-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 .row-item {
   display: flex;
   align-items: center;
@@ -973,6 +980,7 @@ tr.row-done td { color: var(--text-2); }
   .schedule-head { align-items: stretch; flex-direction: column; }
   .schedule-date-picker { justify-content: space-between; }
   .form-grid { grid-template-columns: 1fr; }
+  .driver-checkin-body { align-items: flex-start; flex-direction: column; }
   .modal { padding: 0; align-items: flex-end; }
   .modal-card {
     max-width: none;

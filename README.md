@@ -36,6 +36,7 @@ Built to be used on a **warehouse tablet** as well as on a desk browser.
 | Login with three roles (administrator / warehouse operator / customer) | `routes/auth.js`, `middleware/auth.js` |
 | Customer self-service booking | Customer selects a free 30-minute dock slot, fills in vehicle data and must attach a PDF, image or Excel document |
 | Customer booking tracking | "Mano rezervacijos" shows only the customer's own visits, their live status timeline and available documents |
+| Driver self check-in | QR code opens a public form; matching truck and order numbers mark today's appointment as arrived |
 | Dashboard with today's truck appointments | "Šiandien" tab |
 | Full appointment record (arrival time, operation, plates, driver, carrier, customer, reference, dock, notes) | `appointments` table |
 | Eight statuses | Planned, Arrived, Waiting, At dock, Loading/unloading, Completed, Departed, Cancelled |
@@ -152,6 +153,7 @@ All settings come from `.env` (see `.env.example`).
 | `WAITING_ALERT_MINUTES` | `30` | Waiting longer than this is highlighted |
 | `LATE_GRACE_MINUTES` | `0` | Tolerance before a truck counts as delayed |
 | `UPLOAD_MAX_MB` | `15` | Maximum size of one attached PDF, image or Excel file (MB) |
+| `PUBLIC_BASE_URL` | request URL | Public application URL used in the driver QR code, e.g. `https://dock.cubivo.lt` |
 | `COOKIE_SECURE` | `false` | Set `true` when serving over HTTPS |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME` | — | Used only by `npm run seed` |
 
@@ -312,6 +314,18 @@ audit log like any other change.
 - Warehouse operators and administrators can add documents after unloading; the
   customer can download documents attached to their own booking.
 
+### Driver arrival check-in
+
+In **Settings**, the administrator can open or print the QR code for the warehouse
+entrance. It leads to `/driver-checkin`, which can also be opened directly without a
+QR scan. The driver must enter both the truck plate and the order/reference number.
+Only a matching appointment scheduled for the current warehouse day is accepted. Its
+status changes from `planned` to `arrived`, writes a status event and is visible in the
+warehouse dashboard and the customer's own booking list on the next live refresh.
+
+The public endpoint rate-limits attempts and never returns appointment details when
+the supplied data do not match.
+
 ### Alerts
 
 Both are computed identically on the server (for filters, counters and CSV) and on the
@@ -385,6 +399,14 @@ Authentication is the httpOnly cookie `wops_sid`; the frontend uses
 | GET | `/api/appointments/:id/documents/:documentId/download` | authenticated document download |
 | POST | `/api/appointments/:id/status` | `{status, note?}` → writes timestamp + `status_events` + audit |
 | DELETE | `/api/appointments/:id` | **admin only** |
+
+### Driver check-in
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/driver-checkin` | public mobile-friendly driver check-in form |
+| POST | `/api/driver-checkin` | public `{truckPlate, reference}`; marks today's matching planned appointment as `arrived` |
+| GET | `/api/driver-checkin/qr.svg` | administrator-only QR code for printing/display |
 
 Query filters accepted by the list, stats and CSV endpoints:
 
@@ -491,6 +513,7 @@ This is the intended target and needs no external services.
    DB_NAME=uXXXXXX_warehouse_ops
    DB_POOL_SIZE=5
    COOKIE_SECURE=true
+   PUBLIC_BASE_URL=https://dock.cubivo.lt
    APP_TIMEZONE=Europe/Vilnius
    WAITING_ALERT_MINUTES=30
    ```

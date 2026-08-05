@@ -259,6 +259,7 @@ app.use((req, res, next) => {
 app.use(attachUser);
 
 app.use('/api', require('./routes/auth'));
+app.use('/api/driver-checkin', require('./routes/driver-checkin'));
 app.use('/api/appointments', require('./routes/appointments'));
 app.use('/api/docks', require('./routes/docks'));
 app.use('/api/users', require('./routes/users'));
@@ -276,6 +277,11 @@ app.use(express.static(path.join(__dirname, 'public'), {
     if (filePath.endsWith('index.html')) res.setHeader('Cache-Control', 'no-cache');
   },
 }));
+
+// Vairuotojo puslapis yra viesas ir skirtas QR kodo nuskaitymui.
+app.get('/driver-checkin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'driver-checkin.html'));
+});
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

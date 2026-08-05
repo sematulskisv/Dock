@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="lt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#ff5b1a" />
+  <title>Atvykimo registracija</title>
+  <link rel="stylesheet" href="/driver-checkin.css?v=1" />
+</head>
+<body>
+  <main class="checkin-shell">
+    <section class="checkin-card" aria-labelledby="checkinTitle">
+      <div class="checkin-mark" aria-hidden="true"></div>
+      <p class="eyebrow">SANDĖLIO KROVA</p>
+      <h1 id="checkinTitle">Atvykimo registracija</h1>
+      <p class="intro">Įveskite vilkiko ir užsakymo numerį. Patvirtinus atvykimą, sandėlis bus informuotas iš karto.</p>
+
+      <form id="checkinForm" novalidate>
+        <label>
+          <span>Vilkiko valst. nr.</span>
+          <input id="truckPlate" name="truckPlate" type="text" maxlength="32" required autocomplete="off" autocapitalize="characters" placeholder="ABC123" />
+        </label>
+        <label>
+          <span>Užsakymo / siuntos nr.</span>
+          <input id="reference" name="reference" type="text" maxlength="120" required autocomplete="off" placeholder="UŽSAKYMAS-123" />
+        </label>
+        <p id="formError" class="message error" role="alert" hidden></p>
+        <button id="submitBtn" type="submit">Patvirtinti atvykimą</button>
+      </form>
+
+      <div id="success" class="message success" hidden>
+        <strong>Atvykimas užregistruotas.</strong>
+        <span>Laukite sandėlio darbuotojo nurodymų.</span>
+      </div>
+      <p class="support">Jei nepavyksta užsiregistruoti, kreipkitės į sandėlio darbuotoją.</p>
+    </section>
+  </main>
+  <script src="/driver-checkin.js?v=1"></script>
+</body>
+</html>
