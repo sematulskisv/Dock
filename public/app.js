@@ -80,6 +80,7 @@ const I18N = {
 
     'schedule.title': 'Vartų tvarkaraštis',
     'schedule.help': 'Pasirinkite datą. Laisvas laikas atidaro naują vizitą, užimtas — jo detales.',
+    'schedule.customerHelp': 'Savo rezervacijose matysite vilkiką, vežėją ir būseną. Kitų rezervacijų duomenys yra paslėpti.',
     'schedule.time': 'Laikas',
     'schedule.free': 'Laisva',
     'schedule.busy': 'Užimta',
@@ -286,6 +287,7 @@ const I18N = {
 
     'schedule.title': 'Dock schedule',
     'schedule.help': 'Choose a date. A free time opens a new appointment; a busy time opens its details.',
+    'schedule.customerHelp': 'Your bookings show the truck, carrier and status. Other bookings remain private.',
     'schedule.time': 'Time',
     'schedule.free': 'Available',
     'schedule.busy': 'Busy',
@@ -539,6 +541,14 @@ function countryName(code) {
 function routeLabel(appointment) {
   if (!appointment.origin_country && !appointment.destination_country) return null;
   return `${countryName(appointment.origin_country)} → ${countryName(appointment.destination_country)}`;
+}
+
+function updateScheduleHelp() {
+  const help = $('#scheduleHelp');
+  if (!help) return;
+  const key = state.user && state.user.role === 'customer' ? 'schedule.customerHelp' : 'schedule.help';
+  help.dataset.i18n = key;
+  help.textContent = t(key);
 }
 
 function warehouseTimeZone() {
@@ -1258,20 +1268,25 @@ function scheduleCellHtml(bookings, dock, slot) {
     </td>`;
   }
 
-  const first = bookings[0];
-  if (first.anonymous) {
+  const visibleBookings = bookings.filter((booking) => !booking.anonymous);
+  if (!visibleBookings.length) {
     return `<td class="schedule-cell is-busy"><span class="schedule-slot schedule-unavailable">${escapeHtml(t('schedule.busy'))}</span></td>`;
   }
-  const startsHere = bookings.filter((a) => a.scheduleStartsHere);
+  const startsHere = visibleBookings.filter((a) => a.scheduleStartsHere);
   if (!startsHere.length) {
-    return `<td class="schedule-cell is-busy"><span class="schedule-slot schedule-continuation">${escapeHtml(t('schedule.busy'))}</span></td>`;
+    const continuing = visibleBookings[0];
+    return `<td class="schedule-cell is-busy"><button type="button" class="schedule-slot schedule-continuation" data-action="detail" data-id="${continuing.id}" title="${escapeHtml(continuing.truck_plate)}"><span>${escapeHtml(t('schedule.busy'))}</span></button></td>`;
   }
+  const appointment = startsHere[0];
   const label = startsHere.map((a) => a.truck_plate).join(' · ');
-  const duration = formatHandlingMinutes(startsHere[0].handling_minutes);
+  const duration = formatHandlingMinutes(appointment.handling_minutes);
+  const context = appointment.carrier || appointment.customer || appointment.reference || '';
   return `<td class="schedule-cell is-busy">
-    <button type="button" class="schedule-slot" data-action="detail" data-id="${startsHere[0].id}"
-      title="${escapeHtml(`${label} · ${duration}`)}">
-      <span class="schedule-plate">${escapeHtml(startsHere[0].truck_plate)}</span>
+    <button type="button" class="schedule-slot schedule-booking" data-action="detail" data-id="${appointment.id}"
+      title="${escapeHtml(`${label} · ${context} · ${duration}`)}">
+      <span class="schedule-plate">${escapeHtml(appointment.truck_plate)}</span>
+      ${context ? `<span class="schedule-context">${escapeHtml(context)}</span>` : ''}
+      <span class="schedule-status">${escapeHtml(t(`status.${appointment.status}`))}</span>
       <span class="schedule-extra">${escapeHtml(duration)}</span>
       ${startsHere.length > 1 ? `<span class="schedule-extra">+${startsHere.length - 1}</span>` : ''}
     </button>
@@ -1282,7 +1297,13 @@ function renderSchedule() {
   const host = $('#scheduleGrid');
   const customerMode = state.user && state.user.role === 'customer';
   const rows = state.schedule.rows.filter((a) => a.status !== 'cancelled');
-  const scheduleRows = customerMode ? state.schedule.busy.map((a) => ({ ...a, anonymous: true })) : rows;
+  const ownSlotKeys = new Set(rows.map((a) => `${a.dock_id}|${new Date(a.planned_at).toISOString()}`));
+  const anonymousBusy = customerMode
+    ? state.schedule.busy
+      .filter((a) => !ownSlotKeys.has(`${a.dock_id}|${new Date(a.planned_at).toISOString()}`))
+      .map((a) => ({ ...a, anonymous: true }))
+    : [];
+  const scheduleRows = customerMode ? [...rows, ...anonymousBusy] : rows;
   const dockIds = new Set(rows.filter((a) => a.dock_id != null).map((a) => String(a.dock_id)));
   const docks = customerMode
     ? state.schedule.docks
@@ -1337,10 +1358,13 @@ async function loadSchedule() {
   setLive('loading');
   try {
     if (state.user && state.user.role === 'customer') {
-      const data = await api(`/api/appointments/availability?date=${encodeURIComponent(state.schedule.date)}`);
-      state.schedule.rows = [];
-      state.schedule.busy = data.busy;
-      state.schedule.docks = data.docks;
+      const [availability, ownAppointments] = await Promise.all([
+        api(`/api/appointments/availability?date=${encodeURIComponent(state.schedule.date)}`),
+        api(`/api/appointments?date=${encodeURIComponent(state.schedule.date)}&limit=500&sort=planned_at&dir=asc`),
+      ]);
+      state.schedule.rows = ownAppointments.appointments;
+      state.schedule.busy = availability.busy;
+      state.schedule.docks = availability.docks;
     } else {
       const data = await api(`/api/appointments?date=${encodeURIComponent(state.schedule.date)}&limit=500&sort=planned_at&dir=asc`);
       state.schedule.rows = data.appointments;
@@ -1990,6 +2014,7 @@ async function showApp(user) {
   $$('.customer-hidden').forEach((el) => { el.hidden = customerMode; });
   const dashboardTab = $('#mainTabs [data-view="dashboard"]');
   dashboardTab.textContent = customerMode ? t('nav.myBookings') : t('nav.dashboard');
+  updateScheduleHelp();
 
   await refreshOptions();
   // Numatytieji filtrai tik jau zinant sandelio laiko juosta.
@@ -2192,6 +2217,7 @@ function bindEvents() {
     if (state.user) {
       $('#userRole').textContent = t(`role.${state.user.role}`);
       $('#mainTabs [data-view="dashboard"]').textContent = state.user.role === 'customer' ? t('nav.myBookings') : t('nav.dashboard');
+      updateScheduleHelp();
       setView(state.view);
     }
   });
