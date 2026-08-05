@@ -42,11 +42,8 @@ const I18N = {
 
     'status.planned': 'Suplanuota',
     'status.arrived': 'Atvyko',
-    'status.waiting': 'Laukia',
     'status.at_dock': 'Prie vartų',
-    'status.in_progress': 'Vyksta krova',
     'status.completed': 'Baigta',
-    'status.departed': 'Išvyko',
     'status.cancelled': 'Atšaukta',
     'status.changeTitle': 'Keisti būseną',
     'status.note': 'Pastaba (nebūtina)',
@@ -252,11 +249,8 @@ const I18N = {
 
     'status.planned': 'Planned',
     'status.arrived': 'Arrived',
-    'status.waiting': 'Waiting',
     'status.at_dock': 'At dock',
-    'status.in_progress': 'In progress',
     'status.completed': 'Completed',
-    'status.departed': 'Departed',
     'status.cancelled': 'Cancelled',
     'status.changeTitle': 'Change status',
     'status.note': 'Note (optional)',
@@ -451,17 +445,14 @@ function applyStaticTranslations() {
 
 /* ------------------------------------------------------------- konstantos */
 
-const STATUSES = ['planned', 'arrived', 'waiting', 'at_dock', 'in_progress', 'completed', 'departed', 'cancelled'];
+const STATUSES = ['planned', 'arrived', 'at_dock', 'completed', 'cancelled'];
 
 // Leidžiami perėjimai (turi atitikti lib/appointments.js serveryje)
 const TRANSITIONS = {
-  planned: ['arrived', 'waiting', 'cancelled'],
-  arrived: ['waiting', 'at_dock', 'cancelled'],
-  waiting: ['at_dock', 'cancelled'],
-  at_dock: ['in_progress', 'waiting', 'cancelled'],
-  in_progress: ['completed', 'waiting', 'cancelled'],
-  completed: ['departed', 'in_progress'],
-  departed: [],
+  planned: ['arrived', 'cancelled'],
+  arrived: ['at_dock', 'cancelled'],
+  at_dock: ['completed', 'cancelled'],
+  completed: [],
   cancelled: ['planned'],
 };
 
@@ -469,13 +460,10 @@ const TRANSITIONS = {
 const PRIMARY_NEXT = {
   planned: 'arrived',
   arrived: 'at_dock',
-  waiting: 'at_dock',
-  at_dock: 'in_progress',
-  in_progress: 'completed',
-  completed: 'departed',
+  at_dock: 'completed',
 };
 
-const CLOSED = new Set(['completed', 'departed', 'cancelled']);
+const CLOSED = new Set(['completed', 'cancelled']);
 const EU_COUNTRIES = [
   ['AT', 'Austrija', 'Austria'], ['BE', 'Belgija', 'Belgium'], ['BG', 'Bulgarija', 'Bulgaria'],
   ['HR', 'Kroatija', 'Croatia'], ['CY', 'Kipras', 'Cyprus'], ['CZ', 'Čekija', 'Czechia'],
@@ -750,24 +738,16 @@ function errorMessage(err) {
 /** Skaičiuojama kliente, kad laukimo laikmatis tiksėtų tarp atnaujinimų. */
 function computeAlerts(a) {
   const now = Date.now();
-  const waitLimit = state.options.waitingAlertMinutes || 30;
   const grace = state.options.lateGraceMinutes || 0;
 
-  let waitingMinutes = null;
-  if (a.status === 'arrived' || a.status === 'waiting') {
-    const ref = a.waiting_since || a.arrived_at;
-    if (ref) waitingMinutes = Math.max(0, Math.floor((now - new Date(ref).getTime()) / 60000));
-  }
-
   let delayMinutes = null;
-  if (a.status === 'planned' || a.status === 'arrived' || a.status === 'waiting') {
+  if (a.status === 'planned' || a.status === 'arrived') {
     delayMinutes = Math.max(0, Math.floor((now - new Date(a.planned_at).getTime()) / 60000));
   }
 
   return {
-    waitingMinutes,
     delayMinutes,
-    isWaitingLong: waitingMinutes !== null && waitingMinutes > waitLimit,
+    isWaitingLong: false,
     isDelayed: delayMinutes !== null && delayMinutes > grace,
   };
 }
@@ -784,9 +764,6 @@ function alertBadges(alerts) {
   const out = [];
   if (alerts.isDelayed) {
     out.push(`<span class="badge badge-alert">${escapeHtml(t('alert.late', { n: alerts.delayMinutes }))}</span>`);
-  }
-  if (alerts.isWaitingLong) {
-    out.push(`<span class="badge badge-wait">${escapeHtml(t('alert.waiting', { n: alerts.waitingMinutes }))}</span>`);
   }
   return out.join('');
 }
@@ -851,17 +828,25 @@ function sharedFilterFields(f) {
 function renderDashboardFilters() {
   const f = state.dashboard.filters;
   if (state.user && state.user.role === 'customer') {
+    const stats = state.dashboard.stats || {};
+    const statusFilters = [
+      ['', t('filter.all'), stats.total],
+      ['planned', t('status.planned'), stats.planned],
+      ['arrived', t('status.arrived'), stats.arrived],
+      ['at_dock', t('status.at_dock'), stats.at_dock],
+      ['completed', t('status.completed'), stats.completed],
+      ['cancelled', t('status.cancelled'), stats.cancelled],
+    ];
     $('#filtersDashboard').innerHTML = `
       <div class="customer-filterbar">
         <div class="filter filter-date">
           <label for="fltDate">${escapeHtml(t('filter.date'))}</label>
           <input type="date" id="fltDate" data-filter="date" value="${escapeHtml(f.date || '')}" />
         </div>
-        <div class="filter">
-          <label for="fltCustomerStatus">${escapeHtml(t('filter.status'))}</label>
-          <select id="fltCustomerStatus" data-filter="status">
-            ${optionList(STATUSES.map((s) => ({ value: s, label: t(`status.${s}`) })), f.status, t('filter.all'))}
-          </select>
+        <div class="manager-status-filter" aria-label="${escapeHtml(t('filter.status'))}">
+          ${statusFilters.map(([value, label, count]) => `<button type="button" class="manager-status-chip${(f.status || '') === value ? ' is-active' : ''}" data-action="manager-status-filter" data-status="${value}">
+            ${escapeHtml(label)}<span>${escapeHtml(count ?? 0)}</span>
+          </button>`).join('')}
         </div>
         <button type="button" class="btn btn-ghost btn-sm" data-action="reset-filters">${escapeHtml(t('filter.reset'))}</button>
       </div>`;
@@ -1067,39 +1052,23 @@ function apptCardHtml(a) {
 
 function canManagerCancel(appointment) {
   return state.user && state.user.role === 'customer'
-    && ['planned', 'arrived', 'waiting'].includes(appointment.status);
+    && ['planned', 'arrived'].includes(appointment.status);
 }
 
-function customerBookingCardHtml(a) {
+function managerBookingRowHtml(a) {
   const alerts = computeAlerts(a);
   const route = routeLabel(a);
   return `
-    <article class="customer-booking-card${CLOSED.has(a.status) ? ' is-closed' : ''}" data-id="${a.id}">
-      <div class="customer-booking-top">
-        <div class="customer-booking-time">
-          <span>${escapeHtml(fmtTime(a.planned_at))}</span>
-          <small>${escapeHtml(fmtDate(a.planned_at))}</small>
-        </div>
-        <div class="customer-booking-status">${statusBadge(a.status)}${alertBadges(alerts)}</div>
-      </div>
-      <div class="customer-booking-vehicle">
-        <span class="plate">${escapeHtml(a.truck_plate)}</span>
-        ${a.trailer_plate ? `<span class="muted">/ ${escapeHtml(a.trailer_plate)}</span>` : ''}
-      </div>
-      <div class="customer-booking-route">${escapeHtml(route || '—')}</div>
-      <div class="customer-booking-carrier">
-        <span>${escapeHtml(t('form.carrier'))}</span>
-        <strong>${escapeHtml(a.carrier || '—')}</strong>
-      </div>
-      <div class="customer-booking-meta">
-        <div><span>${escapeHtml(t('col.reference'))}</span><strong>${escapeHtml(a.reference || '—')}</strong></div>
-        <div><span>${escapeHtml(t('form.palletCount'))}</span><strong>${escapeHtml(`${a.pallet_count || 1} PLL · ${formatHandlingMinutes(a.handling_minutes)}`)}</strong></div>
-        <div><span>${escapeHtml(t('col.dock'))}</span><strong>${escapeHtml(a.dock_code || '—')}</strong></div>
-      </div>
-      ${canManagerCancel(a) ? `<button class="customer-booking-cancel" data-action="cancel-booking" data-id="${a.id}">${escapeHtml(t('action.cancelBooking'))}</button>` : ''}
-      <button class="customer-booking-detail" data-action="detail" data-id="${a.id}">
-        ${escapeHtml(t('customer.viewDetails'))}<span aria-hidden="true">→</span>
+    <article class="manager-booking-row${CLOSED.has(a.status) ? ' is-closed' : ''}" data-id="${a.id}">
+      <button class="manager-booking-main" data-action="detail" data-id="${a.id}">
+        <div class="manager-booking-time"><strong>${escapeHtml(fmtTime(a.planned_at))}</strong><span>${escapeHtml(fmtDate(a.planned_at))}</span></div>
+        <div class="manager-booking-vehicle"><span class="plate">${escapeHtml(a.truck_plate)}</span><small>${escapeHtml(a.carrier || '—')}</small></div>
+        <div class="manager-booking-route"><strong>${escapeHtml(route || '—')}</strong><small>${escapeHtml(`${a.pallet_count || 1} PLL · ${formatHandlingMinutes(a.handling_minutes)} · ${a.dock_code || '—'}`)}</small></div>
+        <div class="manager-booking-reference"><span>${escapeHtml(t('col.reference'))}</span><strong>${escapeHtml(a.reference || '—')}</strong></div>
+        <div class="manager-booking-status">${statusBadge(a.status)}${alertBadges(alerts)}</div>
+        <span class="manager-booking-arrow" aria-hidden="true">→</span>
       </button>
+      ${canManagerCancel(a) ? `<button class="manager-booking-cancel" data-action="cancel-booking" data-id="${a.id}" title="${escapeHtml(t('action.cancelBooking'))}">×</button>` : ''}
     </article>`;
 }
 
@@ -1116,7 +1085,7 @@ function renderAppointmentList(hostId, rows) {
 
   if ((state.user && state.user.role === 'customer' && hostId === 'listDashboard') || isNarrow()) {
     if (state.user && state.user.role === 'customer' && hostId === 'listDashboard') {
-      host.innerHTML = `<div class="customer-booking-grid">${rows.map(customerBookingCardHtml).join('')}</div>`;
+      host.innerHTML = `<div class="manager-booking-list">${rows.map(managerBookingRowHtml).join('')}</div>`;
       return;
     }
     host.innerHTML = `<div class="card-list">${rows.map(apptCardHtml).join('')}</div>`;
@@ -1156,11 +1125,6 @@ function renderStats(hostId, stats) {
     { label: t('stat.unloading'), value: stats.unloading },
     { label: t('stat.completed'), value: stats.completed },
     { label: t('stat.delayed'), value: stats.delayed, cls: stats.delayed > 0 ? 'is-alert' : '' },
-    {
-      label: t('stat.waitingLong', { n: state.options.waitingAlertMinutes }),
-      value: stats.waiting_long,
-      cls: stats.waiting_long > 0 ? 'is-warn' : '',
-    },
   ];
 
   host.innerHTML = cards.map((c) => `
@@ -1200,9 +1164,13 @@ async function loadDashboard() {
   setLive('loading');
   try {
     const qs = queryString(state.dashboard.filters);
+    const statsFilters = state.user && state.user.role === 'customer'
+      ? { ...state.dashboard.filters, status: '' }
+      : state.dashboard.filters;
+    const statsQs = queryString(statsFilters);
     const [listResult, statsResult] = await Promise.allSettled([
       api(`/api/appointments?${qs}&limit=500&sort=planned_at&dir=asc`),
-      api(`/api/appointments/stats?${qs}`),
+      api(`/api/appointments/stats?${statsQs}`),
     ]);
     if (listResult.status === 'rejected') throw listResult.reason;
     const list = listResult.value;
@@ -1212,8 +1180,10 @@ async function loadDashboard() {
     state.options.waitingAlertMinutes = list.waitingAlertMinutes;
     state.options.lateGraceMinutes = list.lateGraceMinutes;
 
-    if (state.user && state.user.role === 'customer') renderCustomerStats(stats ? stats.stats : null);
-    else renderStats('statsRow', stats ? stats.stats : null);
+    if (state.user && state.user.role === 'customer') {
+      renderCustomerStats(stats ? stats.stats : null);
+      renderDashboardFilters();
+    } else renderStats('statsRow', stats ? stats.stats : null);
     renderAppointmentList('listDashboard', list.appointments);
     setLive(stats ? '' : 'error');
   } catch (err) {
@@ -2101,6 +2071,12 @@ async function handleAction(action, el) {
         toast(errorMessage(err), 'error');
         el.disabled = false;
       }
+      break;
+
+    case 'manager-status-filter':
+      state.dashboard.filters.status = el.dataset.status || '';
+      renderDashboardFilters();
+      loadDashboard();
       break;
 
     case 'schedule-create':

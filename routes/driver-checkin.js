@@ -64,7 +64,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 20, key: (req) => `d
           WHERE REPLACE(REPLACE(UPPER(truck_plate), ' ', ''), '-', '') = ?
             AND UPPER(TRIM(COALESCE(reference, ''))) = ?
             AND planned_at >= ? AND planned_at < ?
-            AND status IN ('planned', 'arrived', 'waiting')
+            AND status IN ('planned', 'arrived')
           ORDER BY planned_at ASC
           LIMIT 2
           FOR UPDATE`,

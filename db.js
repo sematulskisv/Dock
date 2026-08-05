@@ -160,6 +160,30 @@ async function initDb() {
     if (!exists.rows[0]) await query(`ALTER TABLE appointments ADD COLUMN ${column} ${definition}`);
   }
 
+  // Supaprastinus darbo eiga iki penkiu busenu, seni irasai perskirstomi i
+  // artimiausia veikiancia busena. Ta pati atliekame su istorija, kad detaliu
+  // laiko juosta visada turetu esamus busenu pavadinimus.
+  await query(`UPDATE appointments
+    SET status = CASE status
+      WHEN 'waiting' THEN 'arrived'
+      WHEN 'in_progress' THEN 'at_dock'
+      WHEN 'departed' THEN 'completed'
+      ELSE status END
+    WHERE status IN ('waiting', 'in_progress', 'departed')`);
+  await query(`UPDATE status_events
+    SET from_status = CASE from_status
+      WHEN 'waiting' THEN 'arrived'
+      WHEN 'in_progress' THEN 'at_dock'
+      WHEN 'departed' THEN 'completed'
+      ELSE from_status END,
+        to_status = CASE to_status
+      WHEN 'waiting' THEN 'arrived'
+      WHEN 'in_progress' THEN 'at_dock'
+      WHEN 'departed' THEN 'completed'
+      ELSE to_status END
+    WHERE from_status IN ('waiting', 'in_progress', 'departed')
+       OR to_status IN ('waiting', 'in_progress', 'departed')`);
+
   const docks = await query('SELECT COUNT(*) AS n FROM docks');
   if (Number(docks.rows[0].n) === 0) {
     for (let i = 1; i <= 6; i += 1) {

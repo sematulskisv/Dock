@@ -41,7 +41,7 @@ Built to be used on a **warehouse tablet** as well as on a desk browser.
 | Full appointment record (arrival time, operation, plates, driver, carrier, customer, reference, dock, notes) | `appointments` table |
 | Pallet-based booking duration | 1–8 pallets: 30 min; 9–16: 60 min; 17–26: 90 min; 27–33: 120 min |
 | EU route | Required origin and destination country selectors for all 27 EU countries |
-| Eight statuses | Planned, Arrived, Waiting, At dock, Loading/unloading, Completed, Departed, Cancelled |
+| Five statuses | Planned, Arrived, At dock, Completed, Cancelled |
 | Automatic timestamps on every status change | `POST /api/appointments/:id/status` |
 | Filters: date, operation, status, dock, customer, carrier (+ free text search) | filter bar on every list view |
 | Highlight delayed trucks and trucks waiting over 30 min | red / amber rows + alert counters |
@@ -294,9 +294,9 @@ management, logins, failed logins and logouts.
 ### Status flow
 
 ```
-planned ──> arrived ──> waiting ──> at_dock ──> in_progress ──> completed ──> departed
-   │           │           │           │             │
-   └───────────┴───────────┴───────────┴─────────────┴──────> cancelled ──> planned
+planned ──> arrived ──> at_dock ──> completed
+   │           │           │
+   └───────────┴───────────┴──────────> cancelled ──> planned
 ```
 
 Operators are limited to the transitions above (enforced server-side in
@@ -349,19 +349,15 @@ the supplied data do not match.
 Both are computed identically on the server (for filters, counters and CSV) and on the
 client (so the counters keep ticking between refreshes):
 
-- **Delayed** — status is `planned`, `arrived` or `waiting` and
+- **Delayed** — status is `planned` or `arrived` and
   `now > planned_at + LATE_GRACE_MINUTES`. Red row, red left border, `Vėluoja N min` badge.
-- **Waiting too long** — status is `arrived` or `waiting` and the truck has been waiting
-  longer than `WAITING_ALERT_MINUTES` (default **30**). Amber row, `Laukia N min` badge.
-
-A row can be both; the delay styling wins on the left border and both badges are shown.
-The `Tik problemos` toggle filters the list down to only these rows, and the dashboard
+The `Tik problemos` toggle filters the list down to delayed appointments, and the dashboard
 counters show the totals.
 
 ### Derived values
 
 `work_minutes` = `completed_at − work_started_at`.
-`onsite_minutes` = `departed_at − arrived_at`.
+`onsite_minutes` = `completed_at − arrived_at`.
 Both are computed in SQL and are also exported to CSV.
 
 ---
@@ -406,7 +402,7 @@ Authentication is the httpOnly cookie `wops_sid`; the frontend uses
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/appointments` | filters below; `{appointments, total, limit, offset}` |
-| GET | `/api/appointments/stats` | same filters; counters incl. `delayed`, `waiting_long` |
+| GET | `/api/appointments/stats` | same filters; counters incl. `planned`, `arrived`, `at_dock`, `completed`, `delayed` |
 | GET | `/api/appointments/options` | docks, distinct customers/carriers, thresholds |
 | GET | `/api/appointments/availability?date=YYYY-MM-DD` | active docks and occupied slots only, without personal data |
 | GET | `/api/appointments/:id` | `{appointment, events, audit, documents}` |

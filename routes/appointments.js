@@ -172,7 +172,7 @@ async function fetchOne(id, runner = db) {
   return rows[0] || null;
 }
 
-const DOCK_OCCUPYING_STATUSES = ['at_dock', 'in_progress'];
+const DOCK_OCCUPYING_STATUSES = ['at_dock'];
 
 async function checkDock(client, dockId, appointmentId = null, requireFree = false) {
   if (!dockId) return { error: 'dock_required' };
@@ -186,7 +186,7 @@ async function checkDock(client, dockId, appointmentId = null, requireFree = fal
 
   const occupied = await client.query(
     `SELECT id FROM appointments
-      WHERE dock_id = ? AND status IN ('at_dock', 'in_progress') AND id <> ?
+      WHERE dock_id = ? AND status = 'at_dock' AND id <> ?
       FOR UPDATE`,
     [dockId, appointmentId || 0]
   );
@@ -336,22 +336,21 @@ router.get('/stats', async (req, res) => {
     // todel jas saugu iterpti. Taip apeiname kai kuriu MariaDB hostingu
     // prepared-statement klaida su ? TIMESTAMPADD intervalo argumente.
     const grace = A.lateGraceMinutes();
-    const wait = A.waitingAlertMinutes();
     const sql = `
       SELECT
         COUNT(*) AS total,
         COALESCE(SUM(CASE WHEN a.operation = 'loading' THEN 1 ELSE 0 END), 0) AS loading,
         COALESCE(SUM(CASE WHEN a.operation = 'unloading' THEN 1 ELSE 0 END), 0) AS unloading,
-        COALESCE(SUM(CASE WHEN a.status IN ('planned','arrived','waiting','at_dock','in_progress') THEN 1 ELSE 0 END), 0) AS active,
-        COALESCE(SUM(CASE WHEN a.status IN ('completed','departed') THEN 1 ELSE 0 END), 0) AS completed,
+        COALESCE(SUM(CASE WHEN a.status IN ('planned','arrived','at_dock') THEN 1 ELSE 0 END), 0) AS active,
+        COALESCE(SUM(CASE WHEN a.status = 'planned' THEN 1 ELSE 0 END), 0) AS planned,
+        COALESCE(SUM(CASE WHEN a.status = 'arrived' THEN 1 ELSE 0 END), 0) AS arrived,
+        COALESCE(SUM(CASE WHEN a.status = 'at_dock' THEN 1 ELSE 0 END), 0) AS at_dock,
+        COALESCE(SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed,
         COALESCE(SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled,
-        COALESCE(SUM(CASE WHEN a.status IN ('planned','arrived','waiting')
+        COALESCE(SUM(CASE WHEN a.status IN ('planned','arrived')
                     AND UTC_TIMESTAMP() > a.planned_at + INTERVAL ${grace} MINUTE
                    THEN 1 ELSE 0 END), 0) AS delayed,
-        COALESCE(SUM(CASE WHEN a.status IN ('arrived','waiting')
-                    AND COALESCE(a.waiting_since, a.arrived_at) IS NOT NULL
-                    AND UTC_TIMESTAMP() > COALESCE(a.waiting_since, a.arrived_at) + INTERVAL ${wait} MINUTE
-                   THEN 1 ELSE 0 END), 0) AS waiting_long
+        0 AS waiting_long
       FROM appointments a
       LEFT JOIN docks d ON d.id = a.dock_id
       ${whereSql}
@@ -672,7 +671,7 @@ router.post('/:id/cancel', async (req, res) => {
       const current = await client.query('SELECT * FROM appointments WHERE id = ? FOR UPDATE', [id]);
       const appointment = current.rows[0];
       if (!appointment || Number(appointment.created_by) !== Number(req.user.id)) return { notFound: true };
-      if (!['planned', 'arrived', 'waiting'].includes(appointment.status)) return { conflict: true };
+      if (!['planned', 'arrived'].includes(appointment.status)) return { conflict: true };
 
       await client.query(
         `UPDATE appointments
@@ -759,8 +758,7 @@ router.post('/:id/status', async (req, res) => {
         if (dockProblem) return { conflict: dockProblem.error, occupiedAppointmentId: dockProblem.appointmentId };
       }
 
-      // Laiko zyma: 'waiting' visada perrasoma (kad laukimo skaitiklis butu tikslus),
-      // kitos - fiksuojamos pirma karta (COALESCE).
+      // Kiekvienos likusios busenos pirmoji laiko zyma fiksuojama viena karta.
       const column = A.STATUS_TIMESTAMP[nextStatus];
       let timestampSql = '';
       if (column) {
@@ -768,8 +766,9 @@ router.post('/:id/status', async (req, res) => {
           ? `, ${column} = UTC_TIMESTAMP()`
           : `, ${column} = COALESCE(${column}, UTC_TIMESTAMP())`;
       }
-      // Pereinant i doka laukimo skaitiklis sustabdomas
-      if (nextStatus === 'at_dock') timestampSql += ', waiting_since = NULL';
+      // Siame supaprastintame sraute "Prie vartu" reiskia, kad krova prasideda.
+      if (nextStatus === 'at_dock') timestampSql += ', work_started_at = COALESCE(work_started_at, UTC_TIMESTAMP())';
+      if (nextStatus === 'completed') timestampSql += ', departed_at = COALESCE(departed_at, UTC_TIMESTAMP())';
 
       await client.query(
         `UPDATE appointments
