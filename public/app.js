@@ -17,6 +17,12 @@ const I18N = {
 
     'nav.dashboard': 'Šiandien',
     'nav.myBookings': 'Mano rezervacijos',
+    'customer.eyebrow': 'REZERVACIJŲ CENTRAS',
+    'customer.title': 'Mano krovos',
+    'customer.subtitle': 'Sekite savo vizitų būseną, dokumentus ir planuojamą atvykimo laiką vienoje vietoje.',
+    'customer.active': 'Aktyvios',
+    'customer.completed': 'Užbaigtos',
+    'customer.viewDetails': 'Peržiūrėti rezervaciją',
     'nav.schedule': 'Tvarkaraštis',
     'nav.history': 'Istorija',
     'nav.audit': 'Auditas',
@@ -217,6 +223,12 @@ const I18N = {
 
     'nav.dashboard': 'Today',
     'nav.myBookings': 'My bookings',
+    'customer.eyebrow': 'BOOKING CENTRE',
+    'customer.title': 'My loading slots',
+    'customer.subtitle': 'Follow your visit status, documents and planned arrival time in one place.',
+    'customer.active': 'Active',
+    'customer.completed': 'Completed',
+    'customer.viewDetails': 'View booking',
     'nav.schedule': 'Schedule',
     'nav.history': 'History',
     'nav.audit': 'Audit',
@@ -821,6 +833,23 @@ function sharedFilterFields(f) {
 
 function renderDashboardFilters() {
   const f = state.dashboard.filters;
+  if (state.user && state.user.role === 'customer') {
+    $('#filtersDashboard').innerHTML = `
+      <div class="customer-filterbar">
+        <div class="filter filter-date">
+          <label for="fltDate">${escapeHtml(t('filter.date'))}</label>
+          <input type="date" id="fltDate" data-filter="date" value="${escapeHtml(f.date || '')}" />
+        </div>
+        <div class="filter">
+          <label for="fltCustomerStatus">${escapeHtml(t('filter.status'))}</label>
+          <select id="fltCustomerStatus" data-filter="status">
+            ${optionList(STATUSES.map((s) => ({ value: s, label: t(`status.${s}`) })), f.status, t('filter.all'))}
+          </select>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" data-action="reset-filters">${escapeHtml(t('filter.reset'))}</button>
+      </div>`;
+    return;
+  }
   $('#filtersDashboard').innerHTML = `
     <div class="filter filter-date">
       <label for="fltDate">${escapeHtml(t('filter.date'))}</label>
@@ -1019,6 +1048,34 @@ function apptCardHtml(a) {
   `;
 }
 
+function customerBookingCardHtml(a) {
+  const alerts = computeAlerts(a);
+  const route = routeLabel(a);
+  return `
+    <article class="customer-booking-card${CLOSED.has(a.status) ? ' is-closed' : ''}" data-id="${a.id}">
+      <div class="customer-booking-top">
+        <div class="customer-booking-time">
+          <span>${escapeHtml(fmtTime(a.planned_at))}</span>
+          <small>${escapeHtml(fmtDate(a.planned_at))}</small>
+        </div>
+        <div class="customer-booking-status">${statusBadge(a.status)}${alertBadges(alerts)}</div>
+      </div>
+      <div class="customer-booking-vehicle">
+        <span class="plate">${escapeHtml(a.truck_plate)}</span>
+        ${a.trailer_plate ? `<span class="muted">/ ${escapeHtml(a.trailer_plate)}</span>` : ''}
+      </div>
+      <div class="customer-booking-route">${escapeHtml(route || '—')}</div>
+      <div class="customer-booking-meta">
+        <div><span>${escapeHtml(t('col.reference'))}</span><strong>${escapeHtml(a.reference || '—')}</strong></div>
+        <div><span>${escapeHtml(t('form.palletCount'))}</span><strong>${escapeHtml(`${a.pallet_count || 1} PLL · ${formatHandlingMinutes(a.handling_minutes)}`)}</strong></div>
+        <div><span>${escapeHtml(t('col.dock'))}</span><strong>${escapeHtml(a.dock_code || '—')}</strong></div>
+      </div>
+      <button class="customer-booking-detail" data-action="detail" data-id="${a.id}">
+        ${escapeHtml(t('customer.viewDetails'))}<span aria-hidden="true">→</span>
+      </button>
+    </article>`;
+}
+
 function renderAppointmentList(hostId, rows) {
   const host = $(`#${hostId}`);
   if (!rows.length) {
@@ -1030,7 +1087,11 @@ function renderAppointmentList(hostId, rows) {
     return;
   }
 
-  if (isNarrow()) {
+  if ((state.user && state.user.role === 'customer' && hostId === 'listDashboard') || isNarrow()) {
+    if (state.user && state.user.role === 'customer' && hostId === 'listDashboard') {
+      host.innerHTML = `<div class="customer-booking-grid">${rows.map(customerBookingCardHtml).join('')}</div>`;
+      return;
+    }
     host.innerHTML = `<div class="card-list">${rows.map(apptCardHtml).join('')}</div>`;
     return;
   }
@@ -1082,6 +1143,21 @@ function renderStats(hostId, stats) {
     </div>`).join('');
 }
 
+function renderCustomerStats(stats) {
+  const host = $('#statsRow');
+  if (!stats) { host.innerHTML = ''; return; }
+  const cards = [
+    { label: t('stat.total'), value: stats.total },
+    { label: t('customer.active'), value: stats.active, cls: 'is-active' },
+    { label: t('customer.completed'), value: stats.completed },
+  ];
+  host.innerHTML = cards.map((c) => `
+    <div class="stat customer-stat ${c.cls || ''}">
+      <div class="stat-label">${escapeHtml(c.label)}</div>
+      <div class="stat-value">${escapeHtml(c.value ?? 0)}</div>
+    </div>`).join('');
+}
+
 /* ------------------------------------------------------------ užklausos */
 
 function queryString(filters) {
@@ -1109,7 +1185,8 @@ async function loadDashboard() {
     state.options.waitingAlertMinutes = list.waitingAlertMinutes;
     state.options.lateGraceMinutes = list.lateGraceMinutes;
 
-    renderStats('statsRow', stats ? stats.stats : null);
+    if (state.user && state.user.role === 'customer') renderCustomerStats(stats ? stats.stats : null);
+    else renderStats('statsRow', stats ? stats.stats : null);
     renderAppointmentList('listDashboard', list.appointments);
     setLive(stats ? '' : 'error');
   } catch (err) {
@@ -1888,6 +1965,7 @@ function exportCsv(filters) {
 function showLogin() {
   clearInterval(state.refreshTimer);
   state.user = null;
+  document.body.classList.remove('customer-mode');
   $('#appShell').hidden = true;
   $('#loginView').hidden = false;
   $('#loginPassword').value = '';
@@ -1895,6 +1973,9 @@ function showLogin() {
 
 async function showApp(user) {
   state.user = user;
+  const customerMode = user.role === 'customer';
+  document.body.classList.toggle('customer-mode', customerMode);
+  $('#customerDashboardIntro').hidden = !customerMode;
   $('#loginView').hidden = true;
   $('#appShell').hidden = false;
 
@@ -1902,9 +1983,9 @@ async function showApp(user) {
   $('#userRole').textContent = t(`role.${user.role}`);
   $('#userRole').className = `user-role badge badge-${user.role === 'admin' ? 'in_progress' : 'planned'}`;
   $$('.admin-only').forEach((el) => { el.hidden = user.role !== 'admin'; });
-  $$('.customer-hidden').forEach((el) => { el.hidden = user.role === 'customer'; });
+  $$('.customer-hidden').forEach((el) => { el.hidden = customerMode; });
   const dashboardTab = $('#mainTabs [data-view="dashboard"]');
-  dashboardTab.textContent = user.role === 'customer' ? t('nav.myBookings') : t('nav.dashboard');
+  dashboardTab.textContent = customerMode ? t('nav.myBookings') : t('nav.dashboard');
 
   await refreshOptions();
   // Numatytieji filtrai tik jau zinant sandelio laiko juosta.
