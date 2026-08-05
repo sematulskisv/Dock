@@ -1134,19 +1134,8 @@ function renderStats(hostId, stats) {
     </div>`).join('');
 }
 
-function renderCustomerStats(stats) {
-  const host = $('#statsRow');
-  if (!stats) { host.innerHTML = ''; return; }
-  const cards = [
-    { label: t('stat.total'), value: stats.total },
-    { label: t('customer.active'), value: stats.active, cls: 'is-active' },
-    { label: t('customer.completed'), value: stats.completed },
-  ];
-  host.innerHTML = cards.map((c) => `
-    <div class="stat customer-stat ${c.cls || ''}">
-      <div class="stat-label">${escapeHtml(c.label)}</div>
-      <div class="stat-value">${escapeHtml(c.value ?? 0)}</div>
-    </div>`).join('');
+function renderCustomerStats() {
+  $('#statsRow').innerHTML = '';
 }
 
 /* ------------------------------------------------------------ užklausos */
