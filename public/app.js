@@ -89,7 +89,7 @@ const I18N = {
     'col.driver': 'Vairuotojas',
     'col.carrier': 'Vežėjas',
     'col.customer': 'Klientas',
-    'col.reference': 'Užsakymas',
+    'col.reference': 'Pakrovimo nr.',
     'col.dock': 'Vartai',
     'col.status': 'Būsena',
     'col.actions': 'Veiksmai',
@@ -119,16 +119,17 @@ const I18N = {
     'form.driverPhone': 'Vairuotojo telefonas',
     'form.carrier': 'Vežėjas',
     'form.customer': 'Klientas',
-    'form.reference': 'Užsakymo / siuntos nr.',
+    'form.reference': 'Pakrovimo nr.',
     'form.palletCount': 'Palečių kiekis',
     'form.duration': 'Planuojama krova',
     'form.originCountry': 'Iš šalies',
     'form.destinationCountry': 'Į šalį',
     'form.chooseCountry': 'Pasirinkite šalį',
     'form.dock': 'Sandėlio vartai',
+    'form.dockLocked': 'Vartai priskiriami pagal pasirinktą laiką tvarkaraštyje.',
     'form.notes': 'Pastabos',
     'form.document': 'Prisegtas dokumentas',
-    'form.documentHint': 'PDF, JPG, PNG arba Excel failas. Kliento registracijai privaloma.',
+    'form.documentHint': 'PDF, JPG, PNG arba Excel failas. Kliento registracijai privaloma ir saugiai išsaugoma dokumentų saugykloje.',
     'form.documentRequired': 'Pridėkite dokumentą prieš registruodami vizitą.',
     'form.uploadDocument': 'Pridėti dokumentą',
     'form.documents': 'Dokumentai',
@@ -296,7 +297,7 @@ const I18N = {
     'col.driver': 'Driver',
     'col.carrier': 'Carrier',
     'col.customer': 'Customer',
-    'col.reference': 'Reference',
+    'col.reference': 'Loading No.',
     'col.dock': 'Dock',
     'col.status': 'Status',
     'col.actions': 'Actions',
@@ -326,16 +327,17 @@ const I18N = {
     'form.driverPhone': 'Driver phone',
     'form.carrier': 'Carrier',
     'form.customer': 'Customer',
-    'form.reference': 'Order / shipment ref.',
+    'form.reference': 'Loading No.',
     'form.palletCount': 'Pallet count',
     'form.duration': 'Planned handling time',
     'form.originCountry': 'From country',
     'form.destinationCountry': 'To country',
     'form.chooseCountry': 'Select country',
     'form.dock': 'Warehouse dock',
+    'form.dockLocked': 'The dock is assigned from the selected schedule time.',
     'form.notes': 'Notes',
     'form.document': 'Attached document',
-    'form.documentHint': 'PDF, JPG, PNG or Excel file. Required for customer bookings.',
+    'form.documentHint': 'PDF, JPG, PNG or Excel file. Required for customer bookings and stored securely in document storage.',
     'form.documentRequired': 'Attach a document before submitting the booking.',
     'form.uploadDocument': 'Add document',
     'form.documents': 'Documents',
@@ -513,13 +515,26 @@ function localeTag() {
   return LANG === 'en' ? 'en-GB' : 'lt-LT';
 }
 
+const PALLET_GROUPS = [
+  { max: 8, label: '1–8 PLL', minutes: 30 },
+  { max: 16, label: '9–16 PLL', minutes: 60 },
+  { max: 26, label: '17–26 PLL', minutes: 90 },
+  { max: 33, label: '27–33 PLL', minutes: 120 },
+];
+
+function palletGroupFor(value) {
+  const pallets = Number(value);
+  return PALLET_GROUPS.find((group) => pallets >= 1 && pallets <= group.max) || PALLET_GROUPS[0];
+}
+
+function palletGroupLabel(value) {
+  return palletGroupFor(value).label;
+}
+
 function handlingMinutesForPallets(value) {
   const pallets = Number(value);
   if (!Number.isInteger(pallets) || pallets < 1 || pallets > 33) return null;
-  if (pallets <= 8) return 30;
-  if (pallets <= 16) return 60;
-  if (pallets <= 26) return 90;
-  return 120;
+  return palletGroupFor(pallets).minutes;
 }
 
 function formatHandlingMinutes(value) {
@@ -971,7 +986,7 @@ function apptRowHtml(a) {
       <td>${escapeHtml(a.customer || '—')}</td>
       <td>
         <div>${escapeHtml(a.reference || '—')}</div>
-        <div class="cell-sub">${escapeHtml(`${a.pallet_count || 1} PLL · ${formatHandlingMinutes(a.handling_minutes)}`)}${routeLabel(a) ? ` · ${escapeHtml(routeLabel(a))}` : ''}</div>
+        <div class="cell-sub">${escapeHtml(`${palletGroupLabel(a.pallet_count)} · ${formatHandlingMinutes(a.handling_minutes)}`)}${routeLabel(a) ? ` · ${escapeHtml(routeLabel(a))}` : ''}</div>
       </td>
       <td>${dock}</td>
       <td>
@@ -1002,7 +1017,7 @@ function apptCardHtml(a) {
     [t('filter.carrier'), a.carrier],
     [t('filter.customer'), a.customer],
     [t('col.reference'), a.reference],
-    [t('form.palletCount'), a.pallet_count ? `${a.pallet_count} PLL` : null],
+    [t('form.palletCount'), a.pallet_count ? palletGroupLabel(a.pallet_count) : null],
     [t('form.duration'), formatHandlingMinutes(a.handling_minutes)],
     [t('form.originCountry'), countryName(a.origin_country)],
     [t('form.destinationCountry'), countryName(a.destination_country)],
@@ -1063,7 +1078,7 @@ function managerBookingRowHtml(a) {
       <button class="manager-booking-main" data-action="detail" data-id="${a.id}">
         <div class="manager-booking-time"><strong>${escapeHtml(fmtTime(a.planned_at))}</strong><span>${escapeHtml(fmtDate(a.planned_at))}</span></div>
         <div class="manager-booking-vehicle"><span class="plate">${escapeHtml(a.truck_plate)}</span><small>${escapeHtml(a.carrier || '—')}</small></div>
-        <div class="manager-booking-route"><strong>${escapeHtml(route || '—')}</strong><small>${escapeHtml(`${a.pallet_count || 1} PLL · ${formatHandlingMinutes(a.handling_minutes)} · ${a.dock_code || '—'}`)}</small></div>
+        <div class="manager-booking-route"><strong>${escapeHtml(route || '—')}</strong><small>${escapeHtml(`${palletGroupLabel(a.pallet_count)} · ${formatHandlingMinutes(a.handling_minutes)} · ${a.dock_code || '—'}`)}</small></div>
         <div class="manager-booking-reference"><span>${escapeHtml(t('col.reference'))}</span><strong>${escapeHtml(a.reference || '—')}</strong></div>
         <div class="manager-booking-status">${statusBadge(a.status)}${alertBadges(alerts)}</div>
         <span class="manager-booking-arrow" aria-hidden="true">→</span>
@@ -1597,7 +1612,7 @@ function openApptForm(appt, defaults = {}) {
   $('#fCarrier').value = appt ? (appt.carrier || '') : '';
   $('#fCustomer').value = appt ? (appt.customer || '') : '';
   $('#fReference').value = appt ? (appt.reference || '') : '';
-  $('#fPalletCount').value = appt ? (appt.pallet_count || 1) : 1;
+  $('#fPalletCount').value = String(palletGroupFor(appt ? appt.pallet_count : 1).max);
   $('#fNotes').value = appt ? (appt.notes || '') : '';
 
   fillFormSelects(
@@ -1605,6 +1620,9 @@ function openApptForm(appt, defaults = {}) {
     appt ? appt.origin_country : '',
     appt ? appt.destination_country : ''
   );
+  const lockDock = state.user && state.user.role === 'customer';
+  $('#fDock').disabled = lockDock;
+  $('#dockLockedHint').hidden = !lockDock;
   updatePalletDurationHint();
   openModal('apptModal');
   setTimeout(() => $('#fTruckPlate').focus(), 60);
@@ -1722,7 +1740,7 @@ async function openDetail(id) {
       [t('form.carrier'), a.carrier],
       [t('form.customer'), a.customer],
       [t('form.reference'), a.reference],
-      [t('form.palletCount'), a.pallet_count ? `${a.pallet_count} PLL` : null],
+      [t('form.palletCount'), a.pallet_count ? palletGroupLabel(a.pallet_count) : null],
       [t('form.duration'), formatHandlingMinutes(a.handling_minutes)],
       [t('form.originCountry'), a.origin_country ? countryName(a.origin_country) : null],
       [t('form.destinationCountry'), a.destination_country ? countryName(a.destination_country) : null],
@@ -2207,7 +2225,7 @@ async function handleAction(action, el) {
 }
 
 function bindEvents() {
-  $('#fPalletCount').addEventListener('input', updatePalletDurationHint);
+  $('#fPalletCount').addEventListener('change', updatePalletDurationHint);
 
   // Prisijungimas
   $('#loginForm').addEventListener('submit', async (e) => {

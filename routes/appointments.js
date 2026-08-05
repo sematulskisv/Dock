@@ -13,7 +13,7 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
+const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'uploads'));
 const MAX_UPLOAD_BYTES = (Number(process.env.UPLOAD_MAX_MB) || 15) * 1024 * 1024;
 const ACCEPTED_MIME_TYPES = new Set([
   'application/pdf', 'image/jpeg', 'image/png',
@@ -548,6 +548,8 @@ router.put('/:id', async (req, res) => {
 
   const { errors, data } = validateBody(req.body || {}, { partial: true });
   if (errors.length) return res.status(400).json({ error: 'validation_failed', fields: errors });
+  // Vadybininkas savo rezervacijoje gali koreguoti duomenis, bet ne priskirtus vartus.
+  if (isCustomer(req)) delete data.dock_id;
 
   const keys = Object.keys(data);
   if (!keys.length) return res.status(400).json({ error: 'nothing_to_update' });
